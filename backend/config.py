@@ -1,5 +1,5 @@
 """
-Path constants and directory initialization for Bloomburrow Hub
+Path constants and directory initialization for Weave
 """
 
 import os

@@ -1,5 +1,5 @@
 """
-Bloomburrow Hub - Backend Server
+Weave - Backend Server
 FastAPI application for managing game state and AI DM integration
 """
 
@@ -14,7 +14,7 @@ from routes import templates, campaigns, campaign_content, dm_prep, characters, 
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(title="Bloomburrow Hub", version="1.0.0")
+app = FastAPI(title="Weave", version="1.0.0")
 
 # CORS for frontend
 app.add_middleware(
@@ -41,7 +41,7 @@ app.include_router(dm_ai.router)
 
 @app.get("/")
 def root():
-    return {"status": "ok", "app": "Bloomburrow Hub", "version": "1.0.0"}
+    return {"status": "ok", "app": "Weave", "version": "1.0.0"}
 
 if __name__ == "__main__":
     import uvicorn

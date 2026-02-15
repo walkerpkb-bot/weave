@@ -1,4 +1,4 @@
-# Bloomburrow Hub
+# Weave
 
 A web-based companion app for playing tabletop roguelike RPGs. Originally built for Bloomburrow Adventures, now supports fully customizable campaign systems for any setting.
 
@@ -30,8 +30,8 @@ A web-based companion app for playing tabletop roguelike RPGs. Originally built 
 cd backend
 
 # Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -74,16 +74,28 @@ This migrates your roster, town, stash, and session data into a "Bloomburrow" ca
 ## Project Structure
 
 ```
-bloomburrow-hub/
+weave/
 ├── backend/
-│   ├── main.py                 # FastAPI server
-│   ├── campaign_schema.py      # Pydantic models for campaign system
+│   ├── main.py                 # FastAPI app init, CORS, router includes
+│   ├── config.py               # Path constants (DATA_DIR, PROMPTS_DIR, etc.)
+│   ├── models.py               # All Pydantic request/response models
+│   ├── helpers.py              # File I/O helpers (load_json, save_json, etc.)
+│   ├── campaign_logic.py       # Campaign content/state/run logic
+│   ├── campaign_schema.py      # Campaign data models and validation
 │   ├── dm_context_builder.py   # Builds DM prompts from campaign config
 │   ├── prep_coach_builder.py   # Builds prompts for DM Prep Coach
 │   ├── migrate_to_campaigns.py # Data migration script
 │   ├── requirements.txt
+│   ├── routes/
+│   │   ├── templates.py        # Template listing (2 routes)
+│   │   ├── campaigns.py        # Campaign CRUD, select, banner, system config (10 routes)
+│   │   ├── campaign_content.py # Content, drafts, state, runs, DM context (10 routes)
+│   │   ├── dm_prep.py          # DM prep notes, pins, conversation, coach (8 routes)
+│   │   ├── characters.py       # Character CRUD (5 routes)
+│   │   ├── town.py             # Town + stash management (4 routes)
+│   │   ├── sessions.py         # Session lifecycle + dice (5 routes)
+│   │   └── dm_ai.py            # DM message + image generation (3 routes)
 │   ├── data/
-│   │   ├── campaigns.json      # Campaign metadata
 │   │   ├── templates/          # Pre-built system templates
 │   │   │   ├── bloomburrow.json
 │   │   │   └── default.json
@@ -92,23 +104,39 @@ bloomburrow-hub/
 │   │           ├── roster.json
 │   │           ├── town.json
 │   │           ├── stash.json
-│   │           ├── system.json     # Campaign system config
-│   │           ├── content.json    # Campaign content (NPCs, locations, etc.)
-│   │           ├── dm_prep.json    # DM prep notes and conversation
+│   │           ├── system.json
+│   │           ├── content.json
+│   │           ├── dm_prep.json
 │   │           ├── current_session.json
-│   │           ├── banner.jpg (optional)
 │   │           └── images/
-│   └── prompts/                # Base AI prompt templates
+│   └── prompts/
 │       ├── dm_system.md
-│       └── rules_reference.md
+│       ├── rules_reference.md
+│       └── bloomburrow_lore.md
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx
+│   │   ├── App.jsx             # View routing, hooks, context provider
 │   │   ├── styles.css
+│   │   ├── api/
+│   │   │   ├── client.js       # Centralized apiFetch() + apiUpload() helpers
+│   │   │   ├── campaigns.js    # Campaign CRUD, select, banner, system config
+│   │   │   ├── characters.js   # Character CRUD
+│   │   │   ├── sessions.js     # Session lifecycle, dice
+│   │   │   ├── town.js         # Town + stash
+│   │   │   ├── dm.js           # DM message
+│   │   │   ├── dmPrep.js       # DM prep notes, pins, conversation, coach
+│   │   │   ├── images.js       # Image generation
+│   │   │   ├── templates.js    # Template listing
+│   │   │   └── content.js      # Campaign content, drafts, runs
+│   │   ├── context/
+│   │   │   └── CampaignContext.jsx  # CampaignProvider + useCampaignContext
+│   │   ├── hooks/
+│   │   │   ├── useCampaigns.js      # Campaign list fetching
+│   │   │   └── useCampaignData.js   # In-campaign state + action handlers
 │   │   └── components/
 │   │       ├── CampaignSelector.jsx
 │   │       ├── CampaignCard.jsx
-│   │       ├── CampaignForm.jsx    # Full campaign/system editor
+│   │       ├── CampaignForm.jsx
 │   │       ├── SettingsModal.jsx
 │   │       ├── InCampaignHeader.jsx
 │   │       ├── ChatWindow.jsx
@@ -118,8 +146,9 @@ bloomburrow-hub/
 │   │       ├── CharacterSheet.jsx
 │   │       ├── TownView.jsx
 │   │       ├── SessionPanel.jsx
-│   │       ├── DMPrepSection.jsx   # DM Prep tab container
-│   │       └── PrepCoachChat.jsx   # Prep Coach chat interface
+│   │       ├── DiceRoller.jsx
+│   │       ├── DMPrepSection.jsx
+│   │       └── PrepCoachChat.jsx
 │   └── package.json
 └── README.md
 ```
