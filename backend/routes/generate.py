@@ -60,13 +60,13 @@ def _build_generate_prompt(content: dict, generate: dict, species: list, tags: l
                 existing = content.get("locations", [{}] * (i + 1))[i] if i < len(content.get("locations", [])) else {}
                 sections.append(f"### Location {i} (existing: {json.dumps(existing, default=str)})\nGenerate: {', '.join(fields_list)}")
 
-    # Anchor runs
-    if generate.get("anchor_runs"):
-        for i, run_gen in enumerate(generate["anchor_runs"]):
-            fields_list = [f for f, v in run_gen.items() if v]
+    # Beats
+    if generate.get("beats"):
+        for i, beat_gen in enumerate(generate["beats"]):
+            fields_list = [f for f, v in beat_gen.items() if v]
             if fields_list:
-                existing = content.get("anchor_runs", [{}] * (i + 1))[i] if i < len(content.get("anchor_runs", [])) else {}
-                sections.append(f"### Anchor Run {i} (existing: {json.dumps(existing, default=str)})\nGenerate: {', '.join(fields_list)}")
+                existing = content.get("beats", [{}] * (i + 1))[i] if i < len(content.get("beats", [])) else {}
+                sections.append(f"### Beat {i} (existing: {json.dumps(existing, default=str)})\nGenerate: {', '.join(fields_list)}")
 
     # Character arcs
     if generate.get("character_arcs"):
@@ -84,11 +84,11 @@ Return ONLY a JSON object with this structure (include only sections that have f
   "threat": {"name": "...", "stages": ["..."]},
   "npcs": [{"name": "...", "species": "...", "role": "...", "wants": "...", "secret": "..."}],
   "locations": [{"name": "...", "vibe": "...", "contains": ["tag1"]}],
-  "anchor_runs": [{"id": "...", "hook": "...", "goal": "...", "reveal": "..."}],
+  "beats": [{"id": "...", "description": "...", "hints": ["..."], "revelation": "..."}],
   "character_arcs": [{"id": "...", "name": "...", "milestones": ["..."], "reward_name": "...", "reward_description": "..."}]
 }
 
-For array sections (npcs, locations, anchor_runs, character_arcs), use the same indices as the input.
+For array sections (npcs, locations, beats, character_arcs), use the same indices as the input.
 Only include fields you were asked to generate. Use null for indices that don't need generation.
 
 Rules:
@@ -144,26 +144,26 @@ def _validate_generated(result: dict, species: list, tags: list, existing_ids: s
             if "contains" in loc and tags:
                 loc["contains"] = [t for t in loc["contains"] if t in tags]
 
-    # Validate anchor runs
-    if "anchor_runs" in result:
-        for run in result["anchor_runs"]:
-            if run is None:
+    # Validate beats
+    if "beats" in result:
+        for beat in result["beats"]:
+            if beat is None:
                 continue
-            if "id" in run and isinstance(run["id"], str):
-                run_id = run["id"][:30].lower().replace(" ", "_")
-                run_id = re.sub(r'[^a-z0-9_]', '', run_id)
-                if not id_pattern.match(run_id):
-                    run_id = "run_" + run_id
-                while run_id in existing_ids:
-                    run_id = run_id + "_1"
-                run["id"] = run_id
-                existing_ids.add(run_id)
-            if "hook" in run and isinstance(run["hook"], str):
-                run["hook"] = run["hook"][:300]
-            if "goal" in run and isinstance(run["goal"], str):
-                run["goal"] = run["goal"][:200]
-            if "reveal" in run and isinstance(run["reveal"], str):
-                run["reveal"] = run["reveal"][:300]
+            if "id" in beat and isinstance(beat["id"], str):
+                beat_id = beat["id"][:30].lower().replace(" ", "_")
+                beat_id = re.sub(r'[^a-z0-9_]', '', beat_id)
+                if not id_pattern.match(beat_id):
+                    beat_id = "beat_" + beat_id
+                while beat_id in existing_ids:
+                    beat_id = beat_id + "_1"
+                beat["id"] = beat_id
+                existing_ids.add(beat_id)
+            if "description" in beat and isinstance(beat["description"], str):
+                beat["description"] = beat["description"][:300]
+            if "revelation" in beat and isinstance(beat["revelation"], str):
+                beat["revelation"] = beat["revelation"][:300]
+            if "hints" in beat and isinstance(beat["hints"], list):
+                beat["hints"] = [h[:200] for h in beat["hints"] if isinstance(h, str)][:5]
 
     # Validate character arcs
     if "character_arcs" in result:
@@ -208,9 +208,9 @@ def generate_fields_for_campaign(campaign_id: str, req: GenerateFieldsRequest):
 
     # Collect existing IDs for uniqueness check
     existing_ids = set()
-    for run in req.content.get("anchor_runs", []):
-        if run.get("id"):
-            existing_ids.add(run["id"])
+    for beat in req.content.get("beats", []):
+        if beat.get("id"):
+            existing_ids.add(beat["id"])
     for arc in req.content.get("character_arcs", []):
         if arc.get("id"):
             existing_ids.add(arc["id"])
@@ -248,9 +248,9 @@ def generate_fields_standalone(req: GenerateFieldsRequest):
     tags = req.available_tags
 
     existing_ids = set()
-    for run in req.content.get("anchor_runs", []):
-        if run.get("id"):
-            existing_ids.add(run["id"])
+    for beat in req.content.get("beats", []):
+        if beat.get("id"):
+            existing_ids.add(beat["id"])
     for arc in req.content.get("character_arcs", []):
         if arc.get("id"):
             existing_ids.add(arc["id"])

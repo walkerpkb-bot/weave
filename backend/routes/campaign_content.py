@@ -1,10 +1,10 @@
 """
-Campaign content, drafts, state, runs, and DM context routes
+Campaign content, drafts, state, beats, and DM context routes
 """
 
 from fastapi import APIRouter, HTTPException
 
-from models import CampaignContentRequest, RunCompleteRequest
+from models import CampaignContentRequest, BeatHitRequest
 from helpers import load_json, save_json, load_campaign_json, save_campaign_json
 from campaign_schema import (
     CampaignContent,
@@ -16,8 +16,8 @@ from campaign_logic import (
     load_campaign_content,
     load_campaign_state,
     save_campaign_state,
-    get_available_runs,
-    select_next_run,
+    get_available_beats,
+    advance_threat,
     build_dm_context,
     _migrate_campaign_data,
 )
@@ -81,8 +81,8 @@ def get_campaign_draft(campaign_id: str):
         # Handle old format where draft.json was {content: {...}, system: {...}}
         if "content" in draft and isinstance(draft["content"], dict) and "name" in draft["content"]:
             draft = draft["content"]
-        # Migrate old schema (beats → anchor_runs, etc.)
-        if "beats" in draft or ("threat" in draft and "advance_on" not in draft.get("threat", {})):
+        # Migrate old schema (anchor_runs → beats, etc.)
+        if "anchor_runs" in draft or ("threat" in draft and "advance_on" in draft.get("threat", {})):
             draft = _migrate_campaign_data(draft)
         return {"hasDraft": True, "content": draft}
 
@@ -90,7 +90,7 @@ def get_campaign_draft(campaign_id: str):
     content = load_campaign_json(campaign_id, "campaign.json")
     if content:
         # Migrate if needed
-        if "beats" in content or ("threat" in content and "advance_on" not in content.get("threat", {})):
+        if "anchor_runs" in content or ("threat" in content and "advance_on" in content.get("threat", {})):
             content = _migrate_campaign_data(content)
         return {"hasDraft": False, "content": content}
 
@@ -142,171 +142,84 @@ def reset_campaign_state(campaign_id: str):
     save_campaign_state(campaign_id, state)
     return {"success": True}
 
-@router.get("/campaigns/{campaign_id}/available-runs")
-def get_available_runs_endpoint(campaign_id: str):
-    """Get list of currently available runs"""
+@router.get("/campaigns/{campaign_id}/available-beats")
+def get_available_beats_endpoint(campaign_id: str):
+    """Get list of currently available beats"""
     content = load_campaign_content(campaign_id)
     if not content:
-        return {"anchors": [], "fillers": [], "hasContent": False}
+        return {"beats": [], "hasContent": False}
 
     state = load_campaign_state(campaign_id)
-    available = get_available_runs(content, state)
+    available = get_available_beats(content, state)
 
     return {
         "hasContent": True,
-        "anchors": [{"id": r.id, "hook": r.hook, "goal": r.goal} for r in available["anchors"]],
-        "fillers": available["fillers"],
-        "runs_completed": state.runs_completed,
+        "beats": [{"id": b.id, "description": b.description, "is_finale": b.is_finale} for b in available],
+        "episodes_completed": state.episodes_completed,
         "threat_stage": state.threat_stage
     }
 
-@router.get("/campaigns/{campaign_id}/next-run")
-def get_next_run_endpoint(campaign_id: str):
-    """Get the next recommended run"""
-    content = load_campaign_content(campaign_id)
-    if not content:
-        return {"type": "none", "hasContent": False}
-
-    state = load_campaign_state(campaign_id)
-    return {**select_next_run(content, state), "hasContent": True}
-
-@router.post("/campaigns/{campaign_id}/start-run")
-def start_run(campaign_id: str, run_type: str, run_id: str = None, filler_index: int = None):
-    """Start a run and get DM context"""
+@router.post("/campaigns/{campaign_id}/hit-beat")
+def hit_beat(campaign_id: str, request: BeatHitRequest):
+    """Record that a beat was hit during an episode"""
     content = load_campaign_content(campaign_id)
     if not content:
         raise HTTPException(status_code=404, detail="Campaign content not found")
 
     state = load_campaign_state(campaign_id)
 
-    if run_type == "anchor":
-        run = next((r for r in content.anchor_runs if r.id == run_id), None)
-        if not run:
-            raise HTTPException(status_code=404, detail="Anchor run not found")
-        state.current_run_id = run.id
-        state.current_run_type = "anchor"
-        run_details = {
-            "type": "anchor",
-            "id": run.id,
-            "hook": run.hook,
-            "goal": run.goal,
-            "tone": run.tone or content.tone,
-            "must_include": run.must_include,
-            "reveal": run.reveal
-        }
-    else:
-        if filler_index is None or filler_index >= len(content.filler_seeds):
-            raise HTTPException(status_code=400, detail="Invalid filler index")
-        state.current_run_id = f"filler_{filler_index}"
-        state.current_run_type = "filler"
-        run_details = {
-            "type": "filler",
-            "index": filler_index,
-            "hook": content.filler_seeds[filler_index],
-            "goal": "Complete the task",
-            "tone": content.tone,
-            "must_include": [],
-            "reveal": None
-        }
+    # Find the beat
+    beat = next((b for b in content.beats if b.id == request.beat_id), None)
+    if not beat:
+        raise HTTPException(status_code=404, detail=f"Beat '{request.beat_id}' not found")
 
-    save_campaign_state(campaign_id, state)
-    return build_dm_context(content, state, run_details)
+    if beat.id in state.beats_hit:
+        raise HTTPException(status_code=400, detail=f"Beat '{request.beat_id}' already hit")
 
-@router.post("/campaigns/{campaign_id}/complete-run")
-def complete_run(campaign_id: str, request: RunCompleteRequest):
-    """Complete current run and update state"""
-    content = load_campaign_content(campaign_id)
-    if not content:
-        raise HTTPException(status_code=404, detail="Campaign content not found")
+    # Record the beat hit
+    state.beats_hit.append(beat.id)
 
-    state = load_campaign_state(campaign_id)
+    # Add revelation to facts known
+    if beat.revelation:
+        state.facts_known.append(beat.revelation)
+        state.facts_known = list(set(state.facts_known))
 
-    if not state.current_run_id:
-        raise HTTPException(status_code=400, detail="No active run")
-
-    state.runs_completed += 1
-
-    if request.outcome == "victory":
-        if state.current_run_type == "anchor":
-            state.anchor_runs_completed.append(state.current_run_id)
-            run = next((r for r in content.anchor_runs if r.id == state.current_run_id), None)
-            if run and run.reveal:
-                state.facts_known.append(run.reveal)
-        else:
-            filler_index = int(state.current_run_id.split("_")[1])
-            if filler_index not in state.filler_seeds_used:
-                state.filler_seeds_used.append(filler_index)
-
-    elif request.outcome == "failed":
-        if content.threat.advance_on.value == "run_failed":
-            state.threat_stage = min(state.threat_stage + 1, len(content.threat.stages) - 1)
-
+    # Add any additional facts
     state.facts_known.extend(request.facts_learned)
     state.facts_known = list(set(state.facts_known))
-    state.locations_visited.extend(request.locations_visited)
-    state.locations_visited = list(set(state.locations_visited))
 
+    # Track NPCs met
     for npc_name in request.npcs_met:
         npc_key = npc_name.lower().replace(" ", "_")
         if npc_key in state.npcs:
             state.npcs[npc_key].met = True
 
-    state.current_run_id = None
-    state.current_run_type = None
     save_campaign_state(campaign_id, state)
 
-    # Check periodic threat advance
-    if content.threat.advance_on.value == "every_2_runs" and state.runs_completed % 2 == 0:
-        state.threat_stage = min(state.threat_stage + 1, len(content.threat.stages) - 1)
-        save_campaign_state(campaign_id, state)
-    elif content.threat.advance_on.value == "every_3_runs" and state.runs_completed % 3 == 0:
-        state.threat_stage = min(state.threat_stage + 1, len(content.threat.stages) - 1)
-        save_campaign_state(campaign_id, state)
-
-    # Check if campaign is complete
-    all_anchors_done = all(run.id in state.anchor_runs_completed for run in content.anchor_runs)
+    # Check if campaign is complete (all beats hit or finale beat hit)
+    finale_hit = any(
+        b.is_finale and b.id in state.beats_hit
+        for b in content.beats
+    )
+    all_beats_done = all(b.id in state.beats_hit for b in content.beats)
     threat_maxed = state.threat_stage >= len(content.threat.stages) - 1
 
     return {
         "success": True,
-        "runs_completed": state.runs_completed,
+        "beats_hit": state.beats_hit,
+        "episodes_completed": state.episodes_completed,
         "threat_stage": state.threat_stage,
-        "campaign_complete": all_anchors_done or threat_maxed
+        "campaign_complete": finale_hit or all_beats_done or threat_maxed
     }
 
 @router.get("/campaigns/{campaign_id}/dm-context")
 def get_dm_context_endpoint(campaign_id: str):
-    """Get current DM context for ongoing run"""
+    """Get current DM context for ongoing episode"""
     content = load_campaign_content(campaign_id)
     if not content:
         raise HTTPException(status_code=404, detail="Campaign content not found")
 
     state = load_campaign_state(campaign_id)
 
-    if not state.current_run_id:
-        raise HTTPException(status_code=400, detail="No active run")
-
-    if state.current_run_type == "anchor":
-        run = next((r for r in content.anchor_runs if r.id == state.current_run_id), None)
-        run_details = {
-            "type": "anchor",
-            "id": run.id,
-            "hook": run.hook,
-            "goal": run.goal,
-            "tone": run.tone or content.tone,
-            "must_include": run.must_include,
-            "reveal": run.reveal
-        }
-    else:
-        filler_index = int(state.current_run_id.split("_")[1])
-        run_details = {
-            "type": "filler",
-            "index": filler_index,
-            "hook": content.filler_seeds[filler_index],
-            "goal": "Complete the task",
-            "tone": content.tone,
-            "must_include": [],
-            "reveal": None
-        }
-
-    return build_dm_context(content, state, run_details)
+    episode_details = state.current_episode or {"description": "Freeform episode"}
+    return build_dm_context(content, state, episode_details)

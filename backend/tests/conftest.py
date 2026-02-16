@@ -48,9 +48,9 @@ def sample_state():
     """Return a CampaignState with some progress"""
     return CampaignState(
         threat_stage=1,
-        runs_completed=2,
-        anchor_runs_completed=["first_signs"],
-        filler_seeds_used=[0],
+        episodes_completed=2,
+        beats_hit=["first_signs"],
+        beats_expired=[],
         facts_known=["The Brambles themselves are sick — this isn't normal"],
         npcs={
             "bramblewick": {"met": True, "disposition": "friendly", "secrets_revealed": []},

@@ -69,12 +69,11 @@ class CampaignContentRequest(BaseModel):
     """Request body for campaign content"""
     content: dict
 
-class RunCompleteRequest(BaseModel):
-    """Request body for completing a run"""
-    outcome: str  # "victory", "retreat", "failed"
+class BeatHitRequest(BaseModel):
+    """Request body for hitting a beat"""
+    beat_id: str
     facts_learned: list = []
     npcs_met: list = []
-    locations_visited: list = []
 
 
 # DM Prep request models
@@ -102,6 +101,6 @@ class DMPrepPinRequest(BaseModel):
 
 class GenerateFieldsRequest(BaseModel):
     content: dict
-    generate: dict  # {threat: {name: bool}, npcs: [{field: bool}], locations: [...], anchor_runs: [...], character_arcs: [...]}
+    generate: dict  # {threat: {name: bool}, npcs: [{field: bool}], locations: [...], beats: [...], character_arcs: [...]}
     available_species: list = []
     available_tags: list = []

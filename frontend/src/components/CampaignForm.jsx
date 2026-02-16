@@ -3,19 +3,6 @@ import DMPrepSection from './DMPrepSection'
 import { fetchTemplates as apiGetTemplates, fetchTemplate } from '../api/templates'
 import { generateFields, generateFieldsStandalone } from '../api/content'
 
-const TRIGGER_TYPES = [
-  { value: 'start', label: 'Available from start' },
-  { value: 'after_run', label: 'After completing episode...' },
-  { value: 'after_runs_count', label: 'After X episodes completed' },
-  { value: 'threat_stage', label: 'When threat reaches stage...' },
-]
-
-const THREAT_ADVANCE_OPTIONS = [
-  { value: 'run_failed', label: 'When an episode fails' },
-  { value: 'every_2_runs', label: 'Every 2 episodes' },
-  { value: 'every_3_runs', label: 'Every 3 episodes' },
-  { value: 'manual', label: 'Manual only' },
-]
 
 const REWARD_TYPES = [
   { value: 'stat', label: 'Stat increase' },
@@ -31,10 +18,8 @@ const VALIDATION = {
   maxNPCs: 10,
   minLocations: 2,
   maxLocations: 10,
-  minAnchorRuns: 3,
-  maxAnchorRuns: 10,
-  minFillerSeeds: 5,
-  maxFillerSeeds: 15,
+  minBeats: 3,
+  maxBeats: 10,
   minThreatStages: 3,
   maxThreatStages: 6,
   minSpecies: 2,
@@ -113,8 +98,8 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   const [threatStages, setThreatStages] = useState(
     initialData?.threat?.stages || ['', '', '']
   )
-  const [threatAdvance, setThreatAdvance] = useState(
-    initialData?.threat?.advance_on || 'run_failed'
+  const [threatAdvancesUnlessBeatHit, setThreatAdvancesUnlessBeatHit] = useState(
+    initialData?.threat?.advances_each_episode_unless_beat_hit ?? true
   )
 
   const [npcs, setNpcs] = useState(
@@ -131,16 +116,12 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     ]
   )
 
-  const [anchorRuns, setAnchorRuns] = useState(
-    initialData?.anchor_runs || [
-      { id: '', hook: '', goal: '', tone: '', must_include: [''], reveal: '', trigger: { type: 'start', value: null } },
-      { id: '', hook: '', goal: '', tone: '', must_include: [''], reveal: '', trigger: { type: 'after_run', value: '' } },
-      { id: '', hook: '', goal: '', tone: '', must_include: [''], reveal: '', trigger: { type: 'after_run', value: '' } },
+  const [beats, setBeats] = useState(
+    initialData?.beats || [
+      { id: '', description: '', hints: [''], revelation: '', prerequisites: [], unlocked_by: null, closes_after_episodes: null, is_finale: false },
+      { id: '', description: '', hints: [''], revelation: '', prerequisites: [], unlocked_by: null, closes_after_episodes: null, is_finale: false },
+      { id: '', description: '', hints: [''], revelation: '', prerequisites: [], unlocked_by: null, closes_after_episodes: null, is_finale: false },
     ]
-  )
-
-  const [fillerSeeds, setFillerSeeds] = useState(
-    initialData?.filler_seeds || ['', '', '', '', '']
   )
 
   // === Character Arcs State ===
@@ -156,8 +137,8 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   const [locationDmDecides, setLocationDmDecides] = useState(
     (initialData?.locations || [{}, {}]).map(() => ({}))
   )
-  const [runDmDecides, setRunDmDecides] = useState(
-    (initialData?.anchor_runs || [{}, {}, {}]).map(() => ({}))
+  const [beatDmDecides, setBeatDmDecides] = useState(
+    (initialData?.beats || [{}, {}, {}]).map(() => ({}))
   )
   const [arcDmDecides, setArcDmDecides] = useState(
     (initialData?.character_arcs || []).map(() => ({}))
@@ -348,48 +329,42 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
       errs.push(`At least ${VALIDATION.minLocations} complete locations required`)
     }
 
-    // Anchor runs
-    const validRuns = anchorRuns.filter(r => r.id && r.hook && r.goal && r.reveal)
-    if (validRuns.length < VALIDATION.minAnchorRuns) {
-      errs.push(`At least ${VALIDATION.minAnchorRuns} complete episodes required`)
+    // Beats
+    const validBeats = beats.filter(b => b.id && b.description && b.revelation)
+    if (validBeats.length < VALIDATION.minBeats) {
+      errs.push(`At least ${VALIDATION.minBeats} complete beats required`)
     }
 
-    // Check for start run
-    const hasStartRun = anchorRuns.some(r => r.trigger.type === 'start' && r.id && r.hook)
-    if (!hasStartRun) {
-      errs.push('At least one episode must be available from start')
+    // Check for at least one beat with no prerequisites (available from start)
+    const hasStartBeat = beats.some(b => b.id && b.description && (!b.prerequisites || b.prerequisites.length === 0) && !b.unlocked_by)
+    if (!hasStartBeat) {
+      errs.push('At least one beat must be available from start (no prerequisites)')
     }
 
-    // Check run ID uniqueness
-    const runIds = anchorRuns.map(r => r.id).filter(id => id)
-    if (new Set(runIds).size !== runIds.length) {
-      errs.push('Episode IDs must be unique')
+    // Check beat ID uniqueness
+    const beatIds = beats.map(b => b.id).filter(id => id)
+    if (new Set(beatIds).size !== beatIds.length) {
+      errs.push('Beat IDs must be unique')
     }
 
-    // Check run ID format
+    // Check beat ID format
     const idPattern = /^[a-z][a-z0-9_]*$/
-    for (const run of anchorRuns) {
-      if (run.id && !idPattern.test(run.id)) {
-        errs.push(`Episode ID "${run.id}" must start with letter, use only lowercase, numbers, underscores`)
+    for (const beat of beats) {
+      if (beat.id && !idPattern.test(beat.id)) {
+        errs.push(`Beat ID "${beat.id}" must start with letter, use only lowercase, numbers, underscores`)
       }
     }
 
-    // Check after_run references
-    for (const run of anchorRuns) {
-      if (run.trigger.type === 'after_run' && run.trigger.value) {
-        if (!runIds.includes(run.trigger.value)) {
-          errs.push(`Episode "${run.id}" references unknown episode "${run.trigger.value}"`)
+    // Check prerequisite references
+    for (const beat of beats) {
+      for (const prereq of (beat.prerequisites || [])) {
+        if (!beatIds.includes(prereq)) {
+          errs.push(`Beat "${beat.id}" references unknown prerequisite "${prereq}"`)
         }
-        if (run.trigger.value === run.id) {
-          errs.push(`Episode "${run.id}" cannot trigger after itself`)
+        if (prereq === beat.id) {
+          errs.push(`Beat "${beat.id}" cannot be its own prerequisite`)
         }
       }
-    }
-
-    // Filler seeds
-    const validSeeds = fillerSeeds.filter(s => s.trim().length >= 10)
-    if (validSeeds.length < VALIDATION.minFillerSeeds) {
-      errs.push(`At least ${VALIDATION.minFillerSeeds} filler seeds required (each 10+ chars)`)
     }
 
     // System validation
@@ -416,7 +391,7 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
       threat: {
         name: threatName.trim(),
         stages: threatStages.filter(s => s.trim()).map(s => s.trim()),
-        advance_on: threatAdvance
+        advances_each_episode_unless_beat_hit: threatAdvancesUnlessBeatHit
       },
       npcs: npcs
         .filter(n => n.name && n.role && n.wants && n.secret)
@@ -434,21 +409,18 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
           vibe: l.vibe.trim(),
           contains: l.contains
         })),
-      anchor_runs: anchorRuns
-        .filter(r => r.id && r.hook && r.goal && r.reveal)
-        .map(r => ({
-          id: r.id.trim(),
-          hook: r.hook.trim(),
-          goal: r.goal.trim(),
-          tone: r.tone?.trim() || null,
-          must_include: r.must_include.filter(m => m.trim()).map(m => m.trim()),
-          reveal: r.reveal.trim(),
-          trigger: {
-            type: r.trigger.type,
-            value: r.trigger.value || null
-          }
+      beats: beats
+        .filter(b => b.id && b.description && b.revelation)
+        .map(b => ({
+          id: b.id.trim(),
+          description: b.description.trim(),
+          hints: (b.hints || []).filter(h => h.trim()).map(h => h.trim()),
+          revelation: b.revelation.trim(),
+          prerequisites: b.prerequisites || [],
+          unlocked_by: b.unlocked_by || null,
+          closes_after_episodes: b.closes_after_episodes || null,
+          is_finale: b.is_finale || false,
         })),
-      filler_seeds: fillerSeeds.filter(s => s.trim().length >= 10).map(s => s.trim()),
       character_arcs: characterArcs
         .filter(a => a.id && a.name && a.milestones?.length >= 2 && a.reward?.name && a.reward?.description)
         .map(a => ({
@@ -498,7 +470,7 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
         threat: {
           name: threatName.trim(),
           stages: threatStages.map(s => s.trim()),
-          advance_on: threatAdvance
+          advances_each_episode_unless_beat_hit: threatAdvancesUnlessBeatHit
         },
         npcs: npcs.map(n => ({
           name: n.name?.trim() || '',
@@ -512,19 +484,16 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
           vibe: l.vibe?.trim() || '',
           contains: l.contains || []
         })),
-        anchor_runs: anchorRuns.map(r => ({
-          id: r.id?.trim() || '',
-          hook: r.hook?.trim() || '',
-          goal: r.goal?.trim() || '',
-          tone: r.tone?.trim() || null,
-          must_include: r.must_include.map(m => m?.trim() || ''),
-          reveal: r.reveal?.trim() || '',
-          trigger: {
-            type: r.trigger.type,
-            value: r.trigger.value || null
-          }
+        beats: beats.map(b => ({
+          id: b.id?.trim() || '',
+          description: b.description?.trim() || '',
+          hints: (b.hints || []).map(h => h?.trim() || ''),
+          revelation: b.revelation?.trim() || '',
+          prerequisites: b.prerequisites || [],
+          unlocked_by: b.unlocked_by || null,
+          closes_after_episodes: b.closes_after_episodes || null,
+          is_finale: b.is_finale || false,
         })),
-        filler_seeds: fillerSeeds.map(s => s.trim()),
         character_arcs: characterArcs.map(a => ({
           id: a.id?.trim() || '',
           name: a.name?.trim() || '',
@@ -600,70 +569,57 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     }
   }
 
-  const updateAnchorRun = (index, field, value) => {
-    const updated = [...anchorRuns]
+  const updateBeat = (index, field, value) => {
+    const updated = [...beats]
     updated[index] = { ...updated[index], [field]: value }
-    setAnchorRuns(updated)
+    setBeats(updated)
   }
 
-  const updateRunTrigger = (index, field, value) => {
-    const updated = [...anchorRuns]
-    updated[index].trigger = { ...updated[index].trigger, [field]: value }
-    setAnchorRuns(updated)
+  const updateHint = (beatIndex, itemIndex, value) => {
+    const updated = [...beats]
+    updated[beatIndex].hints[itemIndex] = value
+    setBeats(updated)
   }
 
-  const updateMustInclude = (runIndex, itemIndex, value) => {
-    const updated = [...anchorRuns]
-    updated[runIndex].must_include[itemIndex] = value
-    setAnchorRuns(updated)
-  }
-
-  const addMustInclude = (runIndex) => {
-    if (anchorRuns[runIndex].must_include.length < 5) {
-      const updated = [...anchorRuns]
-      updated[runIndex].must_include = [...updated[runIndex].must_include, '']
-      setAnchorRuns(updated)
+  const addHint = (beatIndex) => {
+    if (beats[beatIndex].hints.length < 5) {
+      const updated = [...beats]
+      updated[beatIndex].hints = [...updated[beatIndex].hints, '']
+      setBeats(updated)
     }
   }
 
-  const removeMustInclude = (runIndex, itemIndex) => {
-    const updated = [...anchorRuns]
-    updated[runIndex].must_include = updated[runIndex].must_include.filter((_, i) => i !== itemIndex)
-    setAnchorRuns(updated)
+  const removeHint = (beatIndex, itemIndex) => {
+    const updated = [...beats]
+    updated[beatIndex].hints = updated[beatIndex].hints.filter((_, i) => i !== itemIndex)
+    setBeats(updated)
   }
 
-  const addAnchorRun = () => {
-    if (anchorRuns.length < VALIDATION.maxAnchorRuns) {
-      setAnchorRuns([...anchorRuns, {
-        id: '', hook: '', goal: '', tone: '', must_include: [''], reveal: '',
-        trigger: { type: 'after_run', value: '' }
+  const togglePrerequisite = (beatIndex, prereqId) => {
+    const updated = [...beats]
+    const prereqs = updated[beatIndex].prerequisites || []
+    if (prereqs.includes(prereqId)) {
+      updated[beatIndex].prerequisites = prereqs.filter(p => p !== prereqId)
+    } else {
+      updated[beatIndex].prerequisites = [...prereqs, prereqId]
+    }
+    setBeats(updated)
+  }
+
+  const addBeat = () => {
+    if (beats.length < VALIDATION.maxBeats) {
+      setBeats([...beats, {
+        id: '', description: '', hints: [''], revelation: '', prerequisites: [],
+        unlocked_by: null, closes_after_episodes: null, is_finale: false,
       }])
-      setRunDmDecides(prev => [...prev, {}])
+      setBeatDmDecides(prev => [...prev, {}])
     }
   }
 
-  const removeAnchorRun = (index) => {
-    if (anchorRuns.length > VALIDATION.minAnchorRuns) {
-      setAnchorRuns(anchorRuns.filter((_, i) => i !== index))
-      setRunDmDecides(prev => prev.filter((_, i) => i !== index))
-    }
-  }
-
-  const updateFillerSeed = (index, value) => {
-    const updated = [...fillerSeeds]
-    updated[index] = value
-    setFillerSeeds(updated)
-  }
-
-  const addFillerSeed = () => {
-    if (fillerSeeds.length < VALIDATION.maxFillerSeeds) {
-      setFillerSeeds([...fillerSeeds, ''])
-    }
-  }
-
-  const removeFillerSeed = (index) => {
-    if (fillerSeeds.length > VALIDATION.minFillerSeeds) {
-      setFillerSeeds(fillerSeeds.filter((_, i) => i !== index))
+  const removeBeat = (index) => {
+    if (beats.length > VALIDATION.minBeats) {
+      setBeats(beats.filter((_, i) => i !== index))
+      setBeatDmDecides(prev => prev.filter((_, i) => i !== index))
     }
   }
 
@@ -761,8 +717,8 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     })
   }
 
-  const toggleRunDmDecides = (i, field) => {
-    setRunDmDecides(prev => {
+  const toggleBeatDmDecides = (i, field) => {
+    setBeatDmDecides(prev => {
       const updated = [...prev]
       updated[i] = { ...updated[i], [field]: !updated[i]?.[field] }
       return updated
@@ -781,7 +737,7 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     if (Object.values(threatDmDecides).some(v => v)) return true
     if (npcDmDecides.some(n => Object.values(n).some(v => v))) return true
     if (locationDmDecides.some(l => Object.values(l).some(v => v))) return true
-    if (runDmDecides.some(r => Object.values(r).some(v => v))) return true
+    if (beatDmDecides.some(b => Object.values(b).some(v => v))) return true
     if (arcDmDecides.some(a => Object.values(a).some(v => v))) return true
     return false
   }
@@ -809,11 +765,11 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     })
     if (locGen.some(l => l)) generate.locations = locGen
 
-    const runGen = runDmDecides.map(r => {
-      const fields = Object.entries(r).filter(([, v]) => v)
+    const beatGen = beatDmDecides.map(b => {
+      const fields = Object.entries(b).filter(([, v]) => v)
       return fields.length > 0 ? Object.fromEntries(fields) : null
     })
-    if (runGen.some(r => r)) generate.anchor_runs = runGen
+    if (beatGen.some(b => b)) generate.beats = beatGen
 
     const arcGen = arcDmDecides.map(a => {
       const fields = Object.entries(a).filter(([, v]) => v)
@@ -824,8 +780,8 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     const content = {
       name, premise, tone,
       threat: { name: threatName, stages: threatStages },
-      npcs, locations, anchor_runs: anchorRuns,
-      filler_seeds: fillerSeeds, character_arcs: characterArcs
+      npcs, locations, beats,
+      character_arcs: characterArcs
     }
 
     const payload = {
@@ -862,10 +818,10 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
         }))
       }
 
-      if (gen.anchor_runs) {
-        setAnchorRuns(prev => prev.map((run, i) => {
-          if (!gen.anchor_runs[i]) return run
-          return { ...run, ...gen.anchor_runs[i] }
+      if (gen.beats) {
+        setBeats(prev => prev.map((beat, i) => {
+          if (!gen.beats[i]) return beat
+          return { ...beat, ...gen.beats[i] }
         }))
       }
 
@@ -901,16 +857,15 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   }
 
   // === Section navigation ===
-  const sections = ['system', 'basics', 'threat', 'npcs', 'locations', 'runs', 'arcs', 'fillers', 'dm-prep']
+  const sections = ['system', 'basics', 'threat', 'npcs', 'locations', 'beats', 'arcs', 'dm-prep']
   const sectionLabels = {
     system: 'System',
     basics: 'Basics',
     threat: 'Threat',
     npcs: 'NPCs',
     locations: 'Locations',
-    runs: 'Episodes',
+    beats: 'Beats',
     arcs: 'Arcs',
-    fillers: 'Filler Seeds',
     'dm-prep': 'DM Prep'
   }
 
@@ -1633,12 +1588,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
             </div>
 
             <div className="form-group">
-              <label>Threat Advances When</label>
-              <select value={threatAdvance} onChange={e => setThreatAdvance(e.target.value)}>
-                {THREAT_ADVANCE_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={threatAdvancesUnlessBeatHit}
+                  onChange={e => setThreatAdvancesUnlessBeatHit(e.target.checked)}
+                />
+                Threat advances each episode unless a beat is hit
+              </label>
             </div>
           </div>
         )}
@@ -1827,182 +1784,148 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
           </div>
         )}
 
-        {/* === EPISODES === */}
-        {currentSection === 'runs' && (
+        {/* === BEATS === */}
+        {currentSection === 'beats' && (
           <div className="form-section">
             <p className="section-intro">
-              Story-beat episodes that advance the plot. The AI will generate journey/site details from your seeds.
+              Story beats that advance the plot. Each beat has a description, hints for the AI, and a revelation the party learns.
             </p>
 
-            {anchorRuns.map((run, i) => (
+            {beats.map((beat, i) => (
               <div key={i} className="sub-form-card">
                 <div className="sub-form-header">
-                  <span>Episode {i + 1}</span>
-                  {anchorRuns.length > VALIDATION.minAnchorRuns && (
-                    <button className="remove-btn" onClick={() => removeAnchorRun(i)}>Remove</button>
-                  )}
-                </div>
-
-                <div className="form-row">
-                  <div className={`form-group half dm-decides-field ${runDmDecides[i]?.id ? 'checked' : ''}`}>
-                    <div className="field-label-row">
-                      <label>ID * <span className="hint">(lowercase, no spaces)</span></label>
-                      <label className="dm-decides-label">
-                        <input type="checkbox" checked={!!runDmDecides[i]?.id} onChange={() => toggleRunDmDecides(i, 'id')} />
-                        DM
-                      </label>
-                    </div>
-                    <input
-                      type="text"
-                      value={run.id}
-                      onChange={e => updateAnchorRun(i, 'id', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
-                      placeholder="e.g., first_signs"
-                      maxLength={30}
-                    />
-                  </div>
-                  <div className="form-group half">
-                    <label>Tone Override <span className="hint">(optional)</span></label>
-                    <input
-                      type="text"
-                      value={run.tone || ''}
-                      onChange={e => updateAnchorRun(i, 'tone', e.target.value)}
-                      placeholder="Leave blank to use campaign tone"
-                      maxLength={100}
-                    />
+                  <span>Beat {i + 1}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <label className="checkbox-label" style={{ fontSize: '0.85rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={beat.is_finale || false}
+                        onChange={e => updateBeat(i, 'is_finale', e.target.checked)}
+                      />
+                      Finale
+                    </label>
+                    {beats.length > VALIDATION.minBeats && (
+                      <button className="remove-btn" onClick={() => removeBeat(i)}>Remove</button>
+                    )}
                   </div>
                 </div>
 
-                <div className={`form-group dm-decides-field ${runDmDecides[i]?.hook ? 'checked' : ''}`}>
+                <div className={`form-group dm-decides-field ${beatDmDecides[i]?.id ? 'checked' : ''}`}>
                   <div className="field-label-row">
-                    <label>Hook * <span className="hint">(the quest prompt shown to players)</span></label>
+                    <label>ID * <span className="hint">(lowercase, no spaces)</span></label>
                     <label className="dm-decides-label">
-                      <input type="checkbox" checked={!!runDmDecides[i]?.hook} onChange={() => toggleRunDmDecides(i, 'hook')} />
+                      <input type="checkbox" checked={!!beatDmDecides[i]?.id} onChange={() => toggleBeatDmDecides(i, 'id')} />
+                      DM
+                    </label>
+                  </div>
+                  <input
+                    type="text"
+                    value={beat.id}
+                    onChange={e => updateBeat(i, 'id', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                    placeholder="e.g., first_signs"
+                    maxLength={30}
+                  />
+                </div>
+
+                <div className={`form-group dm-decides-field ${beatDmDecides[i]?.description ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Description * <span className="hint">(what this beat is about)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!beatDmDecides[i]?.description} onChange={() => toggleBeatDmDecides(i, 'description')} />
                       DM decides
                     </label>
                   </div>
                   <textarea
-                    value={run.hook}
-                    onChange={e => updateAnchorRun(i, 'hook', e.target.value)}
+                    value={beat.description}
+                    onChange={e => updateBeat(i, 'description', e.target.value)}
                     placeholder="e.g., A farmer's child is sick. The healer needs bramble-root, but gatherers have gone missing."
                     rows={2}
                     maxLength={300}
                   />
                 </div>
 
-                <div className={`form-group dm-decides-field ${runDmDecides[i]?.goal ? 'checked' : ''}`}>
-                  <div className="field-label-row">
-                    <label>Goal * <span className="hint">(what success looks like)</span></label>
-                    <label className="dm-decides-label">
-                      <input type="checkbox" checked={!!runDmDecides[i]?.goal} onChange={() => toggleRunDmDecides(i, 'goal')} />
-                      DM decides
-                    </label>
-                  </div>
-                  <input
-                    type="text"
-                    value={run.goal}
-                    onChange={e => updateAnchorRun(i, 'goal', e.target.value)}
-                    placeholder="e.g., Retrieve bramble-root from the Brambles edge"
-                    maxLength={200}
-                  />
-                </div>
-
                 <div className="form-group">
-                  <label>Must Include <span className="hint">(things the AI must weave in, up to 5)</span></label>
-                  {run.must_include.map((item, j) => (
+                  <label>Hints <span className="hint">(things the AI must weave in, up to 5)</span></label>
+                  {(beat.hints || []).map((item, j) => (
                     <div key={j} className="array-item">
                       <input
                         type="text"
                         value={item}
-                        onChange={e => updateMustInclude(i, j, e.target.value)}
+                        onChange={e => updateHint(i, j, e.target.value)}
                         placeholder="e.g., Signs of the blight (blackened leaves)"
                         maxLength={200}
                       />
-                      {run.must_include.length > 1 && (
-                        <button className="remove-btn" onClick={() => removeMustInclude(i, j)}>×</button>
+                      {beat.hints.length > 1 && (
+                        <button className="remove-btn" onClick={() => removeHint(i, j)}>x</button>
                       )}
                     </div>
                   ))}
-                  {run.must_include.length < 5 && (
-                    <button className="add-btn small" onClick={() => addMustInclude(i)}>+ Add Item</button>
+                  {(beat.hints || []).length < 5 && (
+                    <button className="add-btn small" onClick={() => addHint(i)}>+ Add Hint</button>
                   )}
                 </div>
 
-                <div className={`form-group dm-decides-field ${runDmDecides[i]?.reveal ? 'checked' : ''}`}>
+                <div className={`form-group dm-decides-field ${beatDmDecides[i]?.revelation ? 'checked' : ''}`}>
                   <div className="field-label-row">
-                    <label>Reveal * <span className="hint">(what the party learns on success)</span></label>
+                    <label>Revelation * <span className="hint">(what the party learns)</span></label>
                     <label className="dm-decides-label">
-                      <input type="checkbox" checked={!!runDmDecides[i]?.reveal} onChange={() => toggleRunDmDecides(i, 'reveal')} />
+                      <input type="checkbox" checked={!!beatDmDecides[i]?.revelation} onChange={() => toggleBeatDmDecides(i, 'revelation')} />
                       DM decides
                     </label>
                   </div>
                   <input
                     type="text"
-                    value={run.reveal}
-                    onChange={e => updateAnchorRun(i, 'reveal', e.target.value)}
+                    value={beat.revelation}
+                    onChange={e => updateBeat(i, 'revelation', e.target.value)}
                     placeholder="e.g., The Brambles themselves are sick — this isn't normal"
                     maxLength={300}
                   />
                 </div>
 
+                <div className="form-group">
+                  <label>Prerequisites <span className="hint">(beats that must be hit first)</span></label>
+                  <div className="tag-buttons">
+                    {beats.filter((b, j) => j !== i && b.id).map(b => (
+                      <button
+                        key={b.id}
+                        className={`tag-btn ${(beat.prerequisites || []).includes(b.id) ? 'active' : ''}`}
+                        onClick={() => togglePrerequisite(i, b.id)}
+                      >
+                        {b.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="form-row">
                   <div className="form-group half">
-                    <label>Available When</label>
-                    <select
-                      value={run.trigger.type}
-                      onChange={e => updateRunTrigger(i, 'type', e.target.value)}
-                    >
-                      {TRIGGER_TYPES.map(t => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
-                      ))}
-                    </select>
+                    <label>Unlocked After Episode <span className="hint">(optional)</span></label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={beat.unlocked_by ? parseInt(beat.unlocked_by.replace('episode:', '')) || '' : ''}
+                      onChange={e => updateBeat(i, 'unlocked_by', e.target.value ? `episode:${e.target.value}` : null)}
+                      placeholder="e.g., 3"
+                    />
                   </div>
-
-                  {run.trigger.type === 'after_run' && (
-                    <div className="form-group half">
-                      <label>After Episode</label>
-                      <select
-                        value={run.trigger.value || ''}
-                        onChange={e => updateRunTrigger(i, 'value', e.target.value)}
-                      >
-                        <option value="">Select episode...</option>
-                        {anchorRuns.filter((r, j) => j !== i && r.id).map(r => (
-                          <option key={r.id} value={r.id}>{r.id}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {run.trigger.type === 'after_runs_count' && (
-                    <div className="form-group half">
-                      <label>After X Episodes</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="20"
-                        value={run.trigger.value || ''}
-                        onChange={e => updateRunTrigger(i, 'value', e.target.value)}
-                      />
-                    </div>
-                  )}
-
-                  {run.trigger.type === 'threat_stage' && (
-                    <div className="form-group half">
-                      <label>At Threat Stage</label>
-                      <input
-                        type="number"
-                        min="0"
-                        max={threatStages.length - 1}
-                        value={run.trigger.value || ''}
-                        onChange={e => updateRunTrigger(i, 'value', e.target.value)}
-                      />
-                    </div>
-                  )}
+                  <div className="form-group half">
+                    <label>Expires After Episode <span className="hint">(optional)</span></label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={beat.closes_after_episodes || ''}
+                      onChange={e => updateBeat(i, 'closes_after_episodes', e.target.value ? parseInt(e.target.value) : null)}
+                      placeholder="e.g., 5"
+                    />
+                  </div>
                 </div>
               </div>
             ))}
 
-            {anchorRuns.length < VALIDATION.maxAnchorRuns && (
-              <button className="add-btn" onClick={addAnchorRun}>+ Add Episode</button>
+            {beats.length < VALIDATION.maxBeats && (
+              <button className="add-btn" onClick={addBeat}>+ Add Beat</button>
             )}
           </div>
         )}
@@ -2142,43 +2065,13 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
           </div>
         )}
 
-        {/* === FILLER SEEDS === */}
-        {currentSection === 'fillers' && (
-          <div className="form-section">
-            <p className="section-intro">
-              One-liner prompts the AI can expand into full episodes between story beats.
-              Each seed is used once, then removed from the pool.
-            </p>
-
-            {fillerSeeds.map((seed, i) => (
-              <div key={i} className="array-item">
-                <span className="array-index">{i + 1}.</span>
-                <input
-                  type="text"
-                  value={seed}
-                  onChange={e => updateFillerSeed(i, e.target.value)}
-                  placeholder="e.g., Escort refugees fleeing the Brambles to safety"
-                  maxLength={150}
-                />
-                {fillerSeeds.length > VALIDATION.minFillerSeeds && (
-                  <button className="remove-btn" onClick={() => removeFillerSeed(i)}>×</button>
-                )}
-              </div>
-            ))}
-
-            {fillerSeeds.length < VALIDATION.maxFillerSeeds && (
-              <button className="add-btn" onClick={addFillerSeed}>+ Add Filler Seed</button>
-            )}
-          </div>
-        )}
-
         {/* === DM PREP === */}
         {currentSection === 'dm-prep' && campaignId && (
           <DMPrepSection
             campaignId={campaignId}
             npcs={npcs}
             locations={locations}
-            runs={anchorRuns}
+            beats={beats}
           />
         )}
         {currentSection === 'dm-prep' && !campaignId && (

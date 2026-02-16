@@ -28,6 +28,7 @@ from dm_context_builder import (
     build_rules_reference,
     build_lore_section,
 )
+from campaign_logic import get_available_beats
 
 router = APIRouter()
 
@@ -172,35 +173,10 @@ def dm_message(campaign_id: str, msg: DMMessage):
         if prep_data.pinned:
             author_notes.extend([n.dict() for n in prep_data.pinned])
 
-        if state.current_run_id:
-            # Build run details
-            if state.current_run_type == "anchor":
-                run = next((r for r in content.anchor_runs if r.id == state.current_run_id), None)
-                if run:
-                    run_details = {
-                        "type": "anchor",
-                        "id": run.id,
-                        "hook": run.hook,
-                        "goal": run.goal,
-                        "tone": run.tone or content.tone,
-                        "must_include": run.must_include,
-                        "reveal": run.reveal
-                    }
-                    dm_context = build_dm_context(content, state, run_details)
-                    campaign_context_section = build_dm_system_injection(dm_context, session, author_notes)
-            else:
-                filler_index = int(state.current_run_id.split("_")[1])
-                run_details = {
-                    "type": "filler",
-                    "index": filler_index,
-                    "hook": content.filler_seeds[filler_index],
-                    "goal": "Complete the task",
-                    "tone": content.tone,
-                    "must_include": [],
-                    "reveal": None
-                }
-                dm_context = build_dm_context(content, state, run_details)
-                campaign_context_section = build_dm_system_injection(dm_context, session, author_notes)
+        # Build episode details from current state
+        episode_details = state.current_episode or {"description": "Freeform episode", "tone": content.tone}
+        dm_context = build_dm_context(content, state, episode_details)
+        campaign_context_section = build_dm_system_injection(dm_context, session, author_notes)
 
     # Get current state if requested (for freestyle campaigns or fallback)
     state_context = ""

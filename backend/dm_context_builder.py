@@ -70,7 +70,7 @@ You are the Dungeon Master for a {game_name} session. This game is played by {pl
 5. When enemies attack, describe what's coming, ask if they dodge
 6. Track {health_name} for everyone
 
-## Run Phases
+## Episode Phases
 
 Guide the session through these phases:
 1. **hook**: Present the quest, stakes, and choice to accept
@@ -273,33 +273,34 @@ def build_dm_system_injection(dm_context: dict, party_status: Optional[dict] = N
         Markdown string to inject into DM system prompt
     """
     
-    run = dm_context["run"]
+    episode = dm_context.get("episode", dm_context.get("run", {}))
     campaign = dm_context["campaign_context"]
-    
+
     sections = []
-    
+
     # Campaign header
     sections.append(f"""## Campaign: {campaign['name']}
 
 **Premise:** {campaign['premise']}
 
 **Tone:** {campaign['tone']}""")
-    
-    # Current run
-    run_section = f"""## Current Run
 
-**Hook:** {run['hook']}
+    # Current episode
+    episode_section = f"""## Current Episode
 
-**Goal:** {run['goal']}
+**Description:** {episode.get('description', episode.get('hook', 'N/A'))}
 
-**Tone:** {run['tone']}"""
-    
-    if run.get('must_include'):
-        run_section += "\n\n**Must Include:**"
-        for item in run['must_include']:
-            run_section += f"\n- {item}"
-    
-    sections.append(run_section)
+**Goal:** {episode.get('goal', 'N/A')}
+
+**Tone:** {episode.get('tone', campaign.get('tone', 'N/A'))}"""
+
+    if episode.get('hints', episode.get('must_include')):
+        hints = episode.get('hints', episode.get('must_include', []))
+        episode_section += "\n\n**Hints:**"
+        for item in hints:
+            episode_section += f"\n- {item}"
+
+    sections.append(episode_section)
     
     # Threat status
     threat_section = f"""## Threat: {dm_context['threat_name']}
@@ -370,55 +371,68 @@ def build_dm_system_injection(dm_context: dict, party_status: Optional[dict] = N
         if guidance_section:
             sections.append(guidance_section)
 
-    # Run progress
+    # Available beats
+    available_beats = dm_context.get('available_beats', [])
+    if available_beats:
+        beats_section = "## Available Beats\n\n*Story beats the party can pursue:*\n"
+        for b in available_beats:
+            finale_tag = " **(FINALE)**" if b.get('is_finale') else ""
+            beats_section += f"\n- **{b['id']}**: {b['description']}{finale_tag}"
+        sections.append(beats_section)
+
+    # Episode progress
     progress_section = f"""## Campaign Progress
 
-- Runs completed: {dm_context['runs_completed']}
-- Run type: {run['type'].upper()}"""
-    
-    if run['type'] == 'anchor':
-        progress_section += f"\n- Run ID: {run['id']}"
-        if run.get('reveal'):
-            progress_section += f"\n- **On victory, reveal:** {run['reveal']}"
-    
+- Episodes completed: {dm_context.get('episodes_completed', dm_context.get('runs_completed', 0))}"""
+
+    if episode.get('beat_id'):
+        progress_section += f"\n- Current beat: {episode['beat_id']}"
+        if episode.get('revelation'):
+            progress_section += f"\n- **On success, reveal:** {episode['revelation']}"
+
     sections.append(progress_section)
     
     return "\n\n---\n\n".join(sections)
 
 
-def build_run_intro_prompt(dm_context: dict) -> str:
+def build_episode_intro_prompt(dm_context: dict) -> str:
     """
-    Build a prompt to kick off a new run.
-    The DM should respond with the hook narration.
+    Build a prompt to kick off a new episode.
+    The DM should respond with the opening narration.
     """
-    run = dm_context["run"]
-    
-    return f"""Begin this run. The quest hook is: "{run['hook']}"
+    episode = dm_context.get("episode", dm_context.get("run", {}))
 
-Narrate the scene where the party receives this quest. Include:
+    description = episode.get('description', episode.get('hook', 'a new adventure'))
+    tone = episode.get('tone', dm_context.get('campaign_context', {}).get('tone', ''))
+
+    return f"""Begin this episode. The setup is: "{description}"
+
+Narrate the scene where the party encounters this situation. Include:
 - Who is asking for help (can be an NPC or a situation)
 - What the immediate stakes are
 - A sensory detail that hints at the {dm_context['threat_name']}
 
-End by asking the party if they accept the quest.
+End by asking the party what they want to do.
 
-Keep it to 2-3 paragraphs. Warm but with underlying tension appropriate to the tone: {run['tone']}."""
+Keep it to 2-3 paragraphs. Warm but with underlying tension appropriate to the tone: {tone}."""
 
 
-def build_run_resolution_prompt(dm_context: dict, outcome: str) -> str:
+def build_episode_resolution_prompt(dm_context: dict, outcome: str) -> str:
     """
-    Build a prompt for the DM to narrate run resolution.
+    Build a prompt for the DM to narrate episode resolution.
     """
-    run = dm_context["run"]
-    
+    episode = dm_context.get("episode", dm_context.get("run", {}))
+    goal = episode.get('goal', episode.get('description', 'the objective'))
+
     if outcome == "victory":
         reveal_instruction = ""
-        if run.get('reveal'):
-            reveal_instruction = f"\n\nIMPORTANT: This victory reveals the following to the party: \"{run['reveal']}\"\nWeave this reveal into the resolution narration naturally."
-        
-        return f"""The party has completed the run victoriously!
+        revelation = episode.get('revelation', episode.get('reveal'))
+        if revelation:
+            reveal_instruction = f"\n\nIMPORTANT: This victory reveals the following to the party: \"{revelation}\"\nWeave this reveal into the resolution narration naturally."
 
-Goal achieved: {run['goal']}
+        return f"""The party has completed the episode victoriously!
+
+Goal achieved: {goal}
 
 Narrate the resolution:
 - Acknowledge their success with specific callbacks to what they did
@@ -427,28 +441,27 @@ Narrate the resolution:
 {reveal_instruction}
 
 Keep it to 2-3 paragraphs. Celebratory but aware that the larger threat ({dm_context['threat_name']}) still looms."""
-    
-    elif outcome == "retreat":
-        return f"""The party has chosen to retreat before completing the run.
 
-They have not achieved the goal: {run['goal']}
+    elif outcome == "retreat":
+        return f"""The party has chosen to retreat before completing the episode.
+
+They have not achieved the goal: {goal}
 
 Narrate the retreat:
 - Acknowledge this was a strategic choice, not a failure
 - Describe their escape back to town
 - Note that the challenge remains for another day
-- The threat clock does NOT advance on retreat
 
 Keep it brief. Respectful of their choice."""
-    
-    else:  # failed
-        return f"""The party has been knocked out and the run has failed.
 
-They did not achieve: {run['goal']}
+    else:  # failed
+        return f"""The party has been knocked out and the episode has failed.
+
+They did not achieve: {goal}
 
 Narrate the failure:
 - They wake up back in town, rescued by allies or luck
-- The {dm_context['threat_name']} has advanced (threat clock ticked)
+- The {dm_context['threat_name']} may have advanced
 - Current threat status: {dm_context['threat_description']}
 - Something has been lost or gotten worse
 

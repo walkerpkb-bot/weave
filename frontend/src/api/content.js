@@ -24,19 +24,11 @@ export const saveDraft = (campaignId, content) =>
 export const fetchDraft = (campaignId) =>
   apiFetch(`/campaigns/${campaignId}/draft`)
 
-export const fetchAvailableRuns = (campaignId) =>
-  apiFetch(`/campaigns/${campaignId}/available-runs`)
+export const fetchAvailableBeats = (campaignId) =>
+  apiFetch(`/campaigns/${campaignId}/available-beats`)
 
-export const fetchNextRun = (campaignId) =>
-  apiFetch(`/campaigns/${campaignId}/next-run`)
-
-export const startRun = (campaignId, params) =>
-  apiFetch(`/campaigns/${campaignId}/start-run?${new URLSearchParams(params)}`, {
-    method: 'POST',
-  })
-
-export const completeRun = (campaignId, data) =>
-  apiFetch(`/campaigns/${campaignId}/complete-run`, {
+export const hitBeat = (campaignId, data) =>
+  apiFetch(`/campaigns/${campaignId}/hit-beat`, {
     method: 'POST',
     body: JSON.stringify(data),
   })

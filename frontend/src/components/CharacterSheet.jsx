@@ -27,7 +27,8 @@ const DEFAULT_RESOURCES = {
   magic: { name: 'Threads', symbol: '✦', starting: 3, max: 5 }
 }
 
-function CharacterSheet({ character, onSave, onCancel, systemConfig, availableArcs = [] }) {
+function CharacterSheet({ character, onSave, onCancel, systemConfig, availableArcs: rawArcs = [] }) {
+  const availableArcs = rawArcs.filter(a => a.id && a.name)
   // Extract config or use defaults
   const speciesList = systemConfig?.species || DEFAULT_SPECIES
   const statsConfig = systemConfig?.stats || DEFAULT_STATS

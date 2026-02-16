@@ -33,20 +33,6 @@ class LocationTag(str, Enum):
     REST = "rest"
 
 
-class ThreatAdvanceTrigger(str, Enum):
-    RUN_FAILED = "run_failed"
-    EVERY_2_RUNS = "every_2_runs"
-    EVERY_3_RUNS = "every_3_runs"
-    MANUAL = "manual"
-
-
-class RunTriggerType(str, Enum):
-    START = "start"
-    AFTER_RUN = "after_run"
-    AFTER_RUNS_COUNT = "after_runs_count"
-    THREAT_STAGE = "threat_stage"
-
-
 # === Campaign System Configuration ===
 
 class SpeciesDefinition(BaseModel):
@@ -376,41 +362,24 @@ class Location(BaseModel):
     contains: list[str] = Field(..., min_items=1, description="Tags for what can be found here")
 
 
-class RunTrigger(BaseModel):
-    """When an anchor run becomes available"""
-    type: RunTriggerType
-    value: Optional[str] = None  # run_id for AFTER_RUN, number as string for counts
-    
-    @validator('value')
-    def validate_value(cls, v, values):
-        trigger_type = values.get('type')
-        if trigger_type == RunTriggerType.START:
-            return None
-        if trigger_type in [RunTriggerType.AFTER_RUN] and not v:
-            raise ValueError(f"Trigger type {trigger_type} requires a value")
-        if trigger_type in [RunTriggerType.AFTER_RUNS_COUNT, RunTriggerType.THREAT_STAGE]:
-            if not v or not v.isdigit():
-                raise ValueError(f"Trigger type {trigger_type} requires a numeric value")
-        return v
-
-
-class AnchorRun(BaseModel):
-    """A scripted story-beat run"""
+class Beat(BaseModel):
+    """A story beat that advances the campaign narrative"""
     id: str = Field(..., pattern=r'^[a-z][a-z0-9_]*$', max_length=30, description="Unique identifier")
-    hook: str = Field(..., min_length=10, max_length=300, description="The quest prompt shown to players")
-    goal: str = Field(..., min_length=10, max_length=200, description="What success looks like")
-    tone: Optional[str] = Field(None, max_length=100, description="Optional tone override")
-    must_include: list[str] = Field(default_factory=list, max_items=5, description="Things AI must weave in")
-    reveal: str = Field(..., min_length=5, max_length=300, description="What party learns on success")
-    trigger: RunTrigger
+    description: str = Field(..., min_length=10, max_length=300, description="What this beat is about")
+    hints: list[str] = Field(default_factory=list, max_items=5, description="Things AI must weave in")
+    revelation: str = Field(..., min_length=5, max_length=300, description="What party learns when beat is hit")
+    prerequisites: list[str] = Field(default_factory=list, description="Beat IDs that must be hit first")
+    unlocked_by: Optional[str] = Field(None, description="e.g. 'episode:3' — unlocked after N episodes")
+    closes_after_episodes: Optional[int] = Field(None, ge=1, description="Beat expires after this many episodes")
+    is_finale: bool = Field(False, description="Whether this is the campaign finale beat")
 
 
 class Threat(BaseModel):
     """The campaign's escalating threat"""
     name: str = Field(..., min_length=1, max_length=50)
     stages: list[str] = Field(..., min_items=3, max_items=6, description="Escalating threat states")
-    advance_on: ThreatAdvanceTrigger
-    
+    advances_each_episode_unless_beat_hit: bool = Field(True, description="Threat advances each episode unless a beat was hit")
+
     @validator('stages')
     def validate_stages(cls, v):
         for stage in v:
@@ -437,36 +406,28 @@ class CampaignContent(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
     premise: str = Field(..., min_length=20, max_length=500, description="2-4 sentences: what's happening, stakes, goal")
     tone: str = Field(..., min_length=3, max_length=100, description="Short phrase or comma-separated tags")
-    
+
     threat: Threat
     npcs: list[NPC] = Field(..., min_items=2, max_items=10)
     locations: list[Location] = Field(..., min_items=2, max_items=10)
-    anchor_runs: list[AnchorRun] = Field(..., min_items=3, max_items=10)
-    filler_seeds: list[str] = Field(..., min_items=5, max_items=15)
+    beats: list[Beat] = Field(..., min_items=3, max_items=10)
     character_arcs: list[CharacterArc] = Field(default_factory=list)
 
-    @validator('filler_seeds')
-    def validate_filler_seeds(cls, v):
-        for seed in v:
-            if len(seed) < 10 or len(seed) > 150:
-                raise ValueError("Each filler seed must be 10-150 characters")
+    @validator('beats')
+    def validate_beat_prerequisites(cls, v, values):
+        """Ensure prerequisites reference valid beat IDs"""
+        beat_ids = {beat.id for beat in v}
+        for beat in v:
+            for prereq in beat.prerequisites:
+                if prereq not in beat_ids:
+                    raise ValueError(f"Beat '{beat.id}' references unknown prerequisite '{prereq}'")
+                if prereq == beat.id:
+                    raise ValueError(f"Beat '{beat.id}' cannot be its own prerequisite")
         return v
-    
-    @validator('anchor_runs')
-    def validate_anchor_run_references(cls, v, values):
-        """Ensure AFTER_RUN triggers reference valid run IDs"""
-        run_ids = {run.id for run in v}
-        for run in v:
-            if run.trigger.type == RunTriggerType.AFTER_RUN:
-                if run.trigger.value not in run_ids:
-                    raise ValueError(f"Run '{run.id}' references unknown run '{run.trigger.value}'")
-                if run.trigger.value == run.id:
-                    raise ValueError(f"Run '{run.id}' cannot trigger after itself")
-        return v
-    
-    def has_start_run(self) -> bool:
-        """Check if at least one run is available from start"""
-        return any(run.trigger.type == RunTriggerType.START for run in self.anchor_runs)
+
+    def has_available_beat(self) -> bool:
+        """Check if at least one beat has no prerequisites (available from start)"""
+        return any(not beat.prerequisites and not beat.unlocked_by for beat in self.beats)
 
 
 # === Runtime State Models ===
@@ -487,7 +448,7 @@ class DMPrepNote(BaseModel):
     category: Literal["reminder", "voice", "pacing", "secret", "general"] = Field(
         "general", description="Category of the note"
     )
-    related_to: Optional[str] = Field(None, description="NPC name, location, or run_id this relates to")
+    related_to: Optional[str] = Field(None, description="NPC name, location, or beat_id this relates to")
     created_at: str = Field(..., description="ISO datetime when the note was created")
 
 
@@ -502,16 +463,15 @@ class DMPrepData(BaseModel):
 class CampaignState(BaseModel):
     """Runtime state tracking for a campaign"""
     threat_stage: int = 0
-    runs_completed: int = 0
-    anchor_runs_completed: list[str] = Field(default_factory=list)
-    filler_seeds_used: list[int] = Field(default_factory=list)  # indices into filler_seeds
-    current_run_id: Optional[str] = None
-    current_run_type: Optional[Literal["anchor", "filler"]] = None
+    episodes_completed: int = 0
+    beats_hit: list[str] = Field(default_factory=list)
+    beats_expired: list[str] = Field(default_factory=list)
+    current_episode: Optional[dict] = None
     facts_known: list[str] = Field(default_factory=list)
     npcs: dict[str, NPCState] = Field(default_factory=dict)
     locations_visited: list[str] = Field(default_factory=list)
     flags: dict[str, bool] = Field(default_factory=dict)
-    
+
     def initialize_from_content(self, content: CampaignContent):
         """Set up NPC tracking from campaign content"""
         self.npcs = {
@@ -532,42 +492,35 @@ def validate_campaign_content(data: dict) -> ValidationResult:
     """Validate campaign content and return detailed results"""
     errors = []
     warnings = []
-    
+
     try:
         content = CampaignContent(**data)
-        
+
         # Additional semantic checks
-        if not content.has_start_run():
-            errors.append("At least one anchor run must be available from start")
-        
-        # Check for NPC/location references in runs (warnings, not errors)
+        if not content.has_available_beat():
+            errors.append("At least one beat must be available from start (no prerequisites)")
+
+        # Check for NPC/location references in beats (warnings, not errors)
         npc_names = {npc.name.lower() for npc in content.npcs}
         location_names = {loc.name.lower() for loc in content.locations}
-        
-        for run in content.anchor_runs:
-            # Check if must_include mentions NPCs or locations
-            for item in run.must_include:
+
+        for beat in content.beats:
+            for item in beat.hints:
                 item_lower = item.lower()
                 has_npc_ref = any(name in item_lower for name in npc_names)
                 has_loc_ref = any(name in item_lower for name in location_names)
                 if not has_npc_ref and not has_loc_ref:
-                    # This is fine, just a note
                     pass
-        
-        # Warn if filler seeds are sparse
-        if len(content.filler_seeds) < len(content.anchor_runs):
-            warnings.append("Consider adding more filler seeds for variety between anchor runs")
-        
+
         return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
-        
+
     except Exception as e:
         error_str = str(e)
-        # Parse pydantic errors into readable messages
         if "validation error" in error_str.lower():
             errors.append(error_str)
         else:
             errors.append(f"Validation failed: {error_str}")
-        
+
         return ValidationResult(valid=False, errors=errors)
 
 
@@ -576,13 +529,6 @@ def validate_campaign_content(data: dict) -> ValidationResult:
 def content_to_yaml(content: CampaignContent) -> str:
     """Serialize campaign content to YAML"""
     data = content.dict()
-    # Convert enums to strings
-    data['threat']['advance_on'] = content.threat.advance_on.value
-    for run in data['anchor_runs']:
-        run['trigger'] = {
-            'type': run['trigger']['type'],
-            'value': run['trigger']['value']
-        }
     return yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
@@ -617,7 +563,7 @@ EXAMPLE_CAMPAIGN = {
             "Three Tree City quarantined",
             "The Rotwood claims Valley"
         ],
-        "advance_on": "run_failed"
+        "advances_each_episode_unless_beat_hit": True
     },
     "npcs": [
         {
@@ -659,60 +605,52 @@ EXAMPLE_CAMPAIGN = {
             "contains": ["treasure", "danger", "secret"]
         }
     ],
-    "anchor_runs": [
+    "beats": [
         {
             "id": "first_signs",
-            "hook": "A farmer's child is sick. The healer needs bramble-root, but gatherers have gone missing.",
-            "goal": "Retrieve bramble-root from the Brambles edge",
-            "must_include": [
+            "description": "Retrieve bramble-root from the Brambles edge while a farmer's child is sick",
+            "hints": [
                 "Signs of the blight (blackened leaves, bitter smell)",
                 "At least one creature fleeing the Brambles"
             ],
-            "reveal": "The Brambles themselves are sick — this isn't normal",
-            "trigger": {"type": "start"}
+            "revelation": "The Brambles themselves are sick — this isn't normal",
+            "prerequisites": [],
+            "is_finale": False
         },
         {
             "id": "find_the_scholar",
-            "hook": "Rumors speak of a ratfolk hermit who knows the old Brambles paths.",
-            "goal": "Find Bramblewick and earn his trust",
-            "must_include": [
+            "description": "Find Bramblewick the ratfolk hermit and earn his trust",
+            "hints": [
                 "Bramblewick's insect companions",
                 "His paranoia about outsiders"
             ],
-            "reveal": "There's a shrine at the heart of the blight. It can be reached.",
-            "trigger": {"type": "after_run", "value": "first_signs"}
+            "revelation": "There's a shrine at the heart of the blight. It can be reached.",
+            "prerequisites": ["first_signs"],
+            "is_finale": False
         },
         {
             "id": "the_lost_patrol",
-            "hook": "Captain Thornfeather reluctantly asks for help finding his missing guards.",
-            "goal": "Discover what happened to the patrol",
-            "must_include": [
+            "description": "Discover what happened to Captain Thornfeather's missing guards",
+            "hints": [
                 "The Sunken Patrol Camp",
                 "Evidence of what attacked them"
             ],
-            "reveal": "The blight creates corrupted creatures. Thornfeather knows more than he's saying.",
-            "trigger": {"type": "after_runs_count", "value": "2"}
+            "revelation": "The blight creates corrupted creatures. Thornfeather knows more than he's saying.",
+            "prerequisites": [],
+            "unlocked_by": "episode:2",
+            "is_finale": False
         },
         {
             "id": "heart_of_the_rot",
-            "hook": "Bramblewick has mapped a path to the shrine. It's now or never.",
-            "goal": "Reach the shrine and stop the blight at its source",
-            "must_include": [
+            "description": "Reach the shrine and stop the blight at its source",
+            "hints": [
                 "The Withered Clearing",
                 "Boss encounter with the blight's heart"
             ],
-            "reveal": "The blight is cleansed. Valley is saved.",
-            "trigger": {"type": "threat_stage", "value": "3"}
+            "revelation": "The blight is cleansed. Valley is saved.",
+            "prerequisites": ["find_the_scholar"],
+            "is_finale": True
         }
-    ],
-    "filler_seeds": [
-        "Escort refugees fleeing the Brambles to safety",
-        "A blighted creature attacks the town walls — defend!",
-        "Recover supplies from an abandoned farm at the Brambles edge",
-        "Old Mossback has information, but wants something in return",
-        "Strange lights in the Brambles at night — investigate",
-        "A merchant's cart was ambushed; salvage what you can",
-        "Thornfeather's guards are turning back travelers; find another way"
     ]
 }
 
@@ -725,7 +663,7 @@ if __name__ == "__main__":
         print(f"Errors: {result.errors}")
     if result.warnings:
         print(f"Warnings: {result.warnings}")
-    
+
     # Test serialization
     content = CampaignContent(**EXAMPLE_CAMPAIGN)
     print("\n--- YAML Output ---")

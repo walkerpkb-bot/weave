@@ -10,7 +10,7 @@ const NOTE_CATEGORIES = [
   { value: 'reminder', label: 'Reminder' },
 ]
 
-function DMPrepSection({ campaignId, npcs = [], locations = [], runs = [] }) {
+function DMPrepSection({ campaignId, npcs = [], locations = [], beats = [] }) {
   const [prepData, setPrepData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [activeSubSection, setActiveSubSection] = useState('chat')
@@ -144,7 +144,7 @@ function DMPrepSection({ campaignId, npcs = [], locations = [], runs = [] }) {
     { value: '', label: 'None' },
     ...npcs.filter(n => n.name).map(n => ({ value: n.name, label: `NPC: ${n.name}` })),
     ...locations.filter(l => l.name).map(l => ({ value: l.name, label: `Location: ${l.name}` })),
-    ...runs.filter(r => r.id).map(r => ({ value: r.id, label: `Episode: ${r.id}` }))
+    ...beats.filter(b => b.id).map(b => ({ value: b.id, label: `Beat: ${b.id}` }))
   ]
 
   if (loading) {

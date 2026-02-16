@@ -1,5 +1,5 @@
 """
-Tests for session lifecycle and run management routes via TestClient
+Tests for session lifecycle and beat management routes via TestClient
 """
 
 import json
@@ -154,76 +154,51 @@ class TestSessionEnd:
         assert session["active"] is False
 
 
-# === Run lifecycle (campaign_content routes) ===
+# === Beat lifecycle (campaign_content routes) ===
 
 
-class TestRunLifecycle:
-    def test_get_available_runs(self, client, campaign_dir):
-        resp = client.get("/campaigns/test_campaign/available-runs")
+class TestBeatLifecycle:
+    def test_get_available_beats(self, client, campaign_dir):
+        resp = client.get("/campaigns/test_campaign/available-beats")
         assert resp.status_code == 200
         data = resp.json()
         assert data["hasContent"] is True
-        # first_signs already completed in sample_state, find_the_scholar should be available
-        anchor_ids = [a["id"] for a in data["anchors"]]
-        assert "find_the_scholar" in anchor_ids
-        assert "first_signs" not in anchor_ids
+        # first_signs already hit in sample_state, find_the_scholar should be available
+        beat_ids = [b["id"] for b in data["beats"]]
+        assert "find_the_scholar" in beat_ids
+        assert "first_signs" not in beat_ids
 
-    def test_get_next_run(self, client, campaign_dir):
-        resp = client.get("/campaigns/test_campaign/next-run")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["hasContent"] is True
-        assert data["type"] == "anchor"
-
-    def test_start_anchor_run(self, client, campaign_dir):
+    def test_hit_beat(self, client, campaign_dir):
         resp = client.post(
-            "/campaigns/test_campaign/start-run?run_type=anchor&run_id=find_the_scholar",
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "run" in data
-        assert "campaign_context" in data
-
-    def test_complete_run_victory(self, client, campaign_dir):
-        # Start a run first
-        client.post("/campaigns/test_campaign/start-run?run_type=anchor&run_id=find_the_scholar")
-
-        resp = client.post(
-            "/campaigns/test_campaign/complete-run",
-            json={"outcome": "victory", "facts_learned": [], "npcs_met": ["Bramblewick"], "locations_visited": []},
+            "/campaigns/test_campaign/hit-beat",
+            json={"beat_id": "find_the_scholar", "facts_learned": [], "npcs_met": ["Bramblewick"]},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert data["runs_completed"] == 3  # sample_state has 2
+        assert "find_the_scholar" in data["beats_hit"]
 
-    def test_complete_run_failed_advances_threat(self, client, campaign_dir):
-        # Example campaign uses run_failed for threat advancement
-        client.post("/campaigns/test_campaign/start-run?run_type=anchor&run_id=find_the_scholar")
-
+    def test_hit_beat_already_hit_400(self, client, campaign_dir):
         resp = client.post(
-            "/campaigns/test_campaign/complete-run",
-            json={"outcome": "failed", "facts_learned": [], "npcs_met": [], "locations_visited": []},
+            "/campaigns/test_campaign/hit-beat",
+            json={"beat_id": "first_signs", "facts_learned": [], "npcs_met": []},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        # threat_stage should increment from 1 to 2
-        assert data["threat_stage"] == 2
-
-    def test_complete_run_no_active_run_400(self, client, campaign_dir):
-        resp = client.post(
-            "/campaigns/test_campaign/complete-run",
-            json={"outcome": "victory", "facts_learned": [], "npcs_met": [], "locations_visited": []},
-        )
-        # sample_state has no current_run_id
+        # first_signs already hit in sample_state
         assert resp.status_code == 400
+
+    def test_hit_beat_not_found_404(self, client, campaign_dir):
+        resp = client.post(
+            "/campaigns/test_campaign/hit-beat",
+            json={"beat_id": "nonexistent_beat", "facts_learned": [], "npcs_met": []},
+        )
+        assert resp.status_code == 404
 
     def test_get_campaign_state(self, client, campaign_dir):
         resp = client.get("/campaigns/test_campaign/state")
         assert resp.status_code == 200
         data = resp.json()
         assert data["threat_stage"] == 1
-        assert data["runs_completed"] == 2
+        assert data["episodes_completed"] == 2
 
     def test_reset_campaign_state(self, client, campaign_dir):
         resp = client.post("/campaigns/test_campaign/state/reset")
@@ -231,8 +206,8 @@ class TestRunLifecycle:
 
         state = client.get("/campaigns/test_campaign/state").json()
         assert state["threat_stage"] == 0
-        assert state["runs_completed"] == 0
-        assert state["anchor_runs_completed"] == []
+        assert state["episodes_completed"] == 0
+        assert state["beats_hit"] == []
 
 
 # === Dice rolling ===

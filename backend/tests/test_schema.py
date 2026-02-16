@@ -8,16 +8,13 @@ import pytest
 from pydantic import ValidationError
 
 from campaign_schema import (
-    AnchorRun,
+    Beat,
     CampaignContent,
     CampaignState,
     CampaignSystem,
     Location,
     NPC,
-    RunTrigger,
-    RunTriggerType,
     Threat,
-    ThreatAdvanceTrigger,
     ValidationResult,
     validate_campaign_content,
     EXAMPLE_CAMPAIGN,
@@ -25,66 +22,69 @@ from campaign_schema import (
 )
 
 
-# === RunTrigger validation ===
+# === Beat validation ===
 
 
-class TestRunTrigger:
-    def test_start_trigger_valid(self):
-        t = RunTrigger(type=RunTriggerType.START)
-        assert t.type == RunTriggerType.START
-        assert t.value is None
-
-    def test_after_run_without_value_accepted_by_default(self):
-        # Pydantic V2 doesn't run @validator without always=True on Optional fields
-        t = RunTrigger(type=RunTriggerType.AFTER_RUN)
-        assert t.value is None
-
-    def test_after_runs_count_requires_numeric(self):
-        with pytest.raises(ValidationError):
-            RunTrigger(type=RunTriggerType.AFTER_RUNS_COUNT, value="abc")
-
-    def test_after_runs_count_valid(self):
-        t = RunTrigger(type=RunTriggerType.AFTER_RUNS_COUNT, value="3")
-        assert t.value == "3"
-
-    def test_threat_stage_requires_numeric(self):
-        with pytest.raises(ValidationError):
-            RunTrigger(type=RunTriggerType.THREAT_STAGE, value="high")
-
-
-# === AnchorRun validation ===
-
-
-class TestAnchorRun:
-    def test_valid_anchor_run(self):
-        run = AnchorRun(
-            id="test_run",
-            hook="A mysterious letter arrives at the party's doorstep",
-            goal="Find the source of the mysterious letter",
-            reveal="The letter was from the lost king",
-            trigger=RunTrigger(type=RunTriggerType.START),
+class TestBeat:
+    def test_valid_beat(self):
+        beat = Beat(
+            id="test_beat",
+            description="A mysterious letter arrives at the party's doorstep",
+            revelation="The letter was from the lost king",
         )
-        assert run.id == "test_run"
+        assert beat.id == "test_beat"
 
     def test_id_invalid_chars_rejected(self):
         with pytest.raises(ValidationError):
-            AnchorRun(
-                id="Test Run!",
-                hook="A mysterious letter arrives at the party's doorstep",
-                goal="Find the source of the mysterious letter",
-                reveal="The letter was from the lost king",
-                trigger=RunTrigger(type=RunTriggerType.START),
+            Beat(
+                id="Test Beat!",
+                description="A mysterious letter arrives at the party's doorstep",
+                revelation="The letter was from the lost king",
             )
 
-    def test_hook_too_short_rejected(self):
+    def test_description_too_short_rejected(self):
         with pytest.raises(ValidationError):
-            AnchorRun(
-                id="test_run",
-                hook="Short",
-                goal="Find the source of the mysterious letter",
-                reveal="The letter was from the lost king",
-                trigger=RunTrigger(type=RunTriggerType.START),
+            Beat(
+                id="test_beat",
+                description="Short",
+                revelation="The letter was from the lost king",
             )
+
+    def test_beat_with_prerequisites(self):
+        beat = Beat(
+            id="second_beat",
+            description="Follow up on the mysterious letter clues",
+            revelation="The king is alive",
+            prerequisites=["first_beat"],
+        )
+        assert beat.prerequisites == ["first_beat"]
+
+    def test_beat_is_finale(self):
+        beat = Beat(
+            id="finale",
+            description="The final confrontation with the villain",
+            revelation="Peace is restored",
+            is_finale=True,
+        )
+        assert beat.is_finale is True
+
+    def test_beat_with_unlocked_by(self):
+        beat = Beat(
+            id="late_beat",
+            description="Available after several episodes",
+            revelation="A hidden truth",
+            unlocked_by="episode:3",
+        )
+        assert beat.unlocked_by == "episode:3"
+
+    def test_beat_with_closes_after(self):
+        beat = Beat(
+            id="timed_beat",
+            description="Only available for a limited time",
+            revelation="Missed opportunity",
+            closes_after_episodes=5,
+        )
+        assert beat.closes_after_episodes == 5
 
 
 # === Threat validation ===
@@ -99,7 +99,7 @@ class TestThreat:
                 "Stage two description here",
                 "Stage three description here",
             ],
-            advance_on=ThreatAdvanceTrigger.RUN_FAILED,
+            advances_each_episode_unless_beat_hit=True,
         )
         assert len(t.stages) == 3
 
@@ -108,7 +108,7 @@ class TestThreat:
             Threat(
                 name="The Blight",
                 stages=["OK", "Fine stage two here!", "Fine stage three here"],
-                advance_on=ThreatAdvanceTrigger.RUN_FAILED,
+                advances_each_episode_unless_beat_hit=True,
             )
 
     def test_too_few_stages_rejected(self):
@@ -116,14 +116,14 @@ class TestThreat:
             Threat(
                 name="The Blight",
                 stages=["Stage one description", "Stage two description"],
-                advance_on=ThreatAdvanceTrigger.RUN_FAILED,
+                advances_each_episode_unless_beat_hit=True,
             )
 
     def test_six_stages_valid(self):
         t = Threat(
             name="The Blight",
             stages=[f"Stage {i} is happening now" for i in range(6)],
-            advance_on=ThreatAdvanceTrigger.EVERY_2_RUNS,
+            advances_each_episode_unless_beat_hit=False,
         )
         assert len(t.stages) == 6
 
@@ -132,7 +132,7 @@ class TestThreat:
             Threat(
                 name="The Blight",
                 stages=[f"Stage {i} is happening now" for i in range(7)],
-                advance_on=ThreatAdvanceTrigger.EVERY_2_RUNS,
+                advances_each_episode_unless_beat_hit=True,
             )
 
 
@@ -144,27 +144,33 @@ class TestCampaignContent:
         content = CampaignContent(**EXAMPLE_CAMPAIGN)
         assert content.name == "The Rotwood Blight"
 
-    def test_has_start_run_true(self):
+    def test_has_available_beat_true(self):
         content = CampaignContent(**EXAMPLE_CAMPAIGN)
-        assert content.has_start_run() is True
+        assert content.has_available_beat() is True
 
-    def test_has_start_run_false_when_all_gated(self):
+    def test_has_available_beat_false_when_all_gated(self):
         data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        # Change the start trigger to after_run
-        data["anchor_runs"][0]["trigger"] = {"type": "after_run", "value": "heart_of_the_rot"}
+        # Make all beats have prerequisites
+        for beat in data["beats"]:
+            if not beat.get("prerequisites"):
+                beat["prerequisites"] = ["some_other_beat"]
+        # This will fail validation because prerequisites reference nonexistent beat
+        # Instead, make them all depend on each other in a chain
+        data["beats"][0]["prerequisites"] = ["heart_of_the_rot"]
+        data["beats"][2]["prerequisites"] = ["heart_of_the_rot"]
         content = CampaignContent(**data)
-        assert content.has_start_run() is False
+        assert content.has_available_beat() is False
 
-    def test_after_run_references_nonexistent_run_rejected(self):
+    def test_prerequisite_references_nonexistent_beat_rejected(self):
         data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        data["anchor_runs"][1]["trigger"] = {"type": "after_run", "value": "nonexistent_run"}
-        with pytest.raises(ValidationError, match="unknown run"):
+        data["beats"][1]["prerequisites"] = ["nonexistent_beat"]
+        with pytest.raises(ValidationError, match="unknown prerequisite"):
             CampaignContent(**data)
 
-    def test_self_referencing_trigger_rejected(self):
+    def test_self_referencing_prerequisite_rejected(self):
         data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        data["anchor_runs"][0]["trigger"] = {"type": "after_run", "value": "first_signs"}
-        with pytest.raises(ValidationError, match="cannot trigger after itself"):
+        data["beats"][0]["prerequisites"] = ["first_signs"]
+        with pytest.raises(ValidationError, match="cannot be its own prerequisite"):
             CampaignContent(**data)
 
     def test_too_few_npcs_rejected(self):
@@ -179,16 +185,10 @@ class TestCampaignContent:
         with pytest.raises(ValidationError):
             CampaignContent(**data)
 
-    def test_too_few_anchor_runs_rejected(self):
+    def test_too_few_beats_rejected(self):
         data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        data["anchor_runs"] = data["anchor_runs"][:2]
+        data["beats"] = data["beats"][:2]
         with pytest.raises(ValidationError):
-            CampaignContent(**data)
-
-    def test_filler_seed_too_short_rejected(self):
-        data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        data["filler_seeds"][0] = "Short"
-        with pytest.raises(ValidationError, match="filler seed"):
             CampaignContent(**data)
 
 
@@ -206,22 +206,18 @@ class TestValidateCampaignContent:
         assert result.valid is False
         assert len(result.errors) > 0
 
-    def test_no_start_run_is_error(self):
+    def test_no_available_beat_is_error(self):
         data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        # Make all triggers non-start
-        data["anchor_runs"][0]["trigger"] = {"type": "after_run", "value": "heart_of_the_rot"}
+        # Make all beats have prerequisites pointing to other beats
+        data["beats"][0]["prerequisites"] = ["heart_of_the_rot"]
+        data["beats"][2]["prerequisites"] = ["heart_of_the_rot"]
+        # Also add unlocked_by to beats that have no prereqs
+        for beat in data["beats"]:
+            if not beat.get("prerequisites"):
+                beat["unlocked_by"] = "episode:99"
         result = validate_campaign_content(data)
         assert result.valid is False
-        assert any("start" in e.lower() for e in result.errors)
-
-    def test_sparse_fillers_warning(self):
-        data = copy.deepcopy(EXAMPLE_CAMPAIGN)
-        # Reduce filler seeds to fewer than anchor runs (need min 5 though)
-        # The example has 4 anchors and 7 fillers - this is fine
-        # Let's check that the current example doesn't warn
-        result = validate_campaign_content(data)
-        # 7 fillers > 4 anchors, so no sparse warning
-        assert not any("filler" in w.lower() for w in result.warnings)
+        assert any("available from start" in e.lower() for e in result.errors)
 
 
 # === CampaignState ===
@@ -231,9 +227,9 @@ class TestCampaignState:
     def test_default_state(self):
         state = CampaignState()
         assert state.threat_stage == 0
-        assert state.runs_completed == 0
-        assert state.anchor_runs_completed == []
-        assert state.current_run_id is None
+        assert state.episodes_completed == 0
+        assert state.beats_hit == []
+        assert state.current_episode is None
 
     def test_initialize_from_content(self, sample_content):
         state = CampaignState()

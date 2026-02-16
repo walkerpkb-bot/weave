@@ -1,58 +1,66 @@
 """
-Campaign content, state, and run management logic
+Campaign content, state, and beat management logic
 """
-
-import random
 
 from campaign_schema import (
     CampaignContent,
     CampaignState,
     NPCState,
-    RunTriggerType,
     DMPrepData,
 )
 from helpers import load_campaign_json, save_campaign_json
 
 
 def _migrate_campaign_data(data: dict) -> dict:
-    """Migrate old monolithic schema to refactored schema"""
+    """Migrate old anchor_runs schema to beats schema"""
     migrated = dict(data)
 
-    # Migrate beats → anchor_runs
-    if "beats" in migrated and "anchor_runs" not in migrated:
-        anchor_runs = []
-        for i, beat in enumerate(migrated["beats"]):
-            trigger = {"type": "start", "value": None} if i == 0 else {"type": "after_runs_count", "value": str(i)}
-            anchor_runs.append({
-                "id": beat.get("id", f"beat_{i}"),
-                "hook": beat.get("description", ""),
-                "goal": beat.get("description", "")[:200],
-                "tone": None,
-                "must_include": beat.get("hints", []),
-                "reveal": beat.get("revelation", ""),
-                "trigger": trigger,
-            })
-        migrated["anchor_runs"] = anchor_runs
-        del migrated["beats"]
+    # Migrate anchor_runs → beats
+    if "anchor_runs" in migrated and "beats" not in migrated:
+        beats = []
+        anchor_runs = migrated["anchor_runs"]
+        for i, run in enumerate(anchor_runs):
+            prerequisites = []
+            trigger = run.get("trigger", {})
+            trigger_type = trigger.get("type", "start")
+            trigger_value = trigger.get("value", "")
 
-    # Migrate threat.advances_each_episode_unless_beat_hit → threat.advance_on
-    if "threat" in migrated and "advance_on" not in migrated["threat"]:
-        if migrated["threat"].pop("advances_each_episode_unless_beat_hit", False):
-            migrated["threat"]["advance_on"] = "every_2_runs"
-        else:
-            migrated["threat"]["advance_on"] = "run_failed"
+            unlocked_by = None
+            if trigger_type == "after_run" and trigger_value:
+                prerequisites = [trigger_value]
+            elif trigger_type == "after_runs_count":
+                unlocked_by = f"episode:{trigger_value}"
 
-    # Ensure filler_seeds exists
-    if "filler_seeds" not in migrated:
-        migrated["filler_seeds"] = [
-            "A routine delivery goes sideways",
-            "An unexpected encounter on the road",
-            "A mysterious stranger needs help",
-            "Bad weather forces a detour",
-            "A rival faction makes trouble",
-        ]
+            is_last = (i == len(anchor_runs) - 1)
 
-    # Strip unknown fields from NPCs (e.g. unlocked_by)
+            beat = {
+                "id": run.get("id", f"beat_{i+1}"),
+                "description": run.get("goal", run.get("hook", "Unknown")),
+                "hints": run.get("must_include", []),
+                "revelation": run.get("reveal", "Unknown revelation"),
+                "prerequisites": prerequisites,
+                "unlocked_by": unlocked_by,
+                "closes_after_episodes": None,
+                "is_finale": is_last
+            }
+            beats.append(beat)
+        migrated["beats"] = beats
+        del migrated["anchor_runs"]
+
+    # Remove filler_seeds
+    migrated.pop("filler_seeds", None)
+
+    # Migrate threat.advance_on → threat.advances_each_episode_unless_beat_hit
+    if "threat" in migrated:
+        threat = migrated["threat"]
+        if "advance_on" in threat and "advances_each_episode_unless_beat_hit" not in threat:
+            advance_on = threat.pop("advance_on")
+            # every_2_runs / every_3_runs / run_failed all map to True
+            threat["advances_each_episode_unless_beat_hit"] = advance_on != "manual"
+        elif "advance_on" in threat:
+            threat.pop("advance_on")
+
+    # Strip unknown fields from NPCs
     if "npcs" in migrated:
         for npc in migrated["npcs"]:
             for key in list(npc.keys()):
@@ -65,6 +73,27 @@ def _migrate_campaign_data(data: dict) -> dict:
             for key in list(loc.keys()):
                 if key not in ("name", "vibe", "contains"):
                     del loc[key]
+
+    return migrated
+
+
+def _migrate_state_data(data: dict) -> dict:
+    """Migrate old run-based state to episode/beat state"""
+    migrated = dict(data)
+
+    if "runs_completed" in migrated:
+        migrated["episodes_completed"] = migrated.pop("runs_completed")
+    if "anchor_runs_completed" in migrated:
+        migrated["beats_hit"] = migrated.pop("anchor_runs_completed")
+    if "beats_expired" not in migrated:
+        migrated["beats_expired"] = []
+    if "current_episode" not in migrated:
+        migrated["current_episode"] = None
+
+    # Remove old fields
+    migrated.pop("filler_seeds_used", None)
+    migrated.pop("current_run_id", None)
+    migrated.pop("current_run_type", None)
 
     return migrated
 
@@ -92,83 +121,76 @@ def load_campaign_state(campaign_id: str) -> CampaignState:
     data = load_campaign_json(campaign_id, "state.json")
     if not data:
         return CampaignState()
+    # Auto-migrate old state format
+    if "runs_completed" in data or "anchor_runs_completed" in data:
+        data = _migrate_state_data(data)
+        save_campaign_json(campaign_id, "state.json", data)
     return CampaignState(**data)
 
 def save_campaign_state(campaign_id: str, state: CampaignState):
     """Save runtime campaign state"""
     save_campaign_json(campaign_id, "state.json", state.dict())
 
-def check_trigger(trigger, state: CampaignState) -> bool:
-    """Check if a run trigger condition is met"""
-    if trigger.type == RunTriggerType.START:
-        return True
-    if trigger.type == RunTriggerType.AFTER_RUN:
-        return trigger.value in state.anchor_runs_completed
-    if trigger.type == RunTriggerType.AFTER_RUNS_COUNT:
-        return state.runs_completed >= int(trigger.value)
-    if trigger.type == RunTriggerType.THREAT_STAGE:
-        return state.threat_stage >= int(trigger.value)
-    return False
 
-def get_available_runs(content: CampaignContent, state: CampaignState) -> dict:
-    """Get currently available anchor runs and filler seeds"""
-    available_anchors = []
-    for run in content.anchor_runs:
-        if run.id not in state.anchor_runs_completed:
-            if check_trigger(run.trigger, state):
-                available_anchors.append(run)
+def get_available_beats(content: CampaignContent, state: CampaignState) -> list:
+    """Get currently available beats (not hit/expired, prerequisites met, unlocked)"""
+    available = []
+    for beat in content.beats:
+        # Skip already hit or expired
+        if beat.id in state.beats_hit or beat.id in state.beats_expired:
+            continue
 
-    available_fillers = []
-    for i, seed in enumerate(content.filler_seeds):
-        if i not in state.filler_seeds_used:
-            available_fillers.append({"index": i, "seed": seed})
+        # Check prerequisites
+        if not all(prereq in state.beats_hit for prereq in beat.prerequisites):
+            continue
 
-    return {"anchors": available_anchors, "fillers": available_fillers}
+        # Check unlocked_by (e.g. "episode:3")
+        if beat.unlocked_by:
+            if beat.unlocked_by.startswith("episode:"):
+                required_episodes = int(beat.unlocked_by.split(":")[1])
+                if state.episodes_completed < required_episodes:
+                    continue
 
-def select_next_run(content: CampaignContent, state: CampaignState) -> dict:
-    """Select the next recommended run"""
-    available = get_available_runs(content, state)
+        # Check expiry
+        if check_beat_expiry(beat, state):
+            continue
 
-    if available["anchors"]:
-        run = available["anchors"][0]
-        return {
-            "type": "anchor",
-            "id": run.id,
-            "hook": run.hook,
-            "goal": run.goal,
-            "tone": run.tone or content.tone,
-            "must_include": run.must_include,
-            "reveal": run.reveal
-        }
+        available.append(beat)
+    return available
 
-    if available["fillers"]:
-        filler = random.choice(available["fillers"])
-        return {
-            "type": "filler",
-            "index": filler["index"],
-            "hook": filler["seed"],
-            "goal": "Complete the task",
-            "tone": content.tone,
-            "must_include": [],
-            "reveal": None
-        }
 
-    return {"type": "none", "message": "No runs available. Campaign may be complete."}
+def check_beat_expiry(beat, state: CampaignState) -> bool:
+    """Check if a beat has expired based on closes_after_episodes"""
+    if beat.closes_after_episodes is None:
+        return False
+    return state.episodes_completed >= beat.closes_after_episodes
 
-def build_dm_context(content: CampaignContent, state: CampaignState, run_details: dict) -> dict:
+
+def advance_threat(content: CampaignContent, state: CampaignState, beat_hit_this_episode: bool) -> bool:
+    """Advance threat if configured and no beat was hit. Returns True if advanced."""
+    if not content.threat.advances_each_episode_unless_beat_hit:
+        return False
+    if beat_hit_this_episode:
+        return False
+    if state.threat_stage >= len(content.threat.stages) - 1:
+        return False
+    state.threat_stage += 1
+    return True
+
+
+def build_dm_context(content: CampaignContent, state: CampaignState, episode_details: dict) -> dict:
     """Build full context for the DM"""
     party_knows = list(state.facts_known)
     party_does_not_know = []
 
     for npc in content.npcs:
-        npc_key = npc.name.lower().replace(" ", "_")
         if npc.secret not in party_knows:
             party_does_not_know.append(f"{npc.name}'s secret: {npc.secret}")
 
-    for run in content.anchor_runs:
-        if run.id not in state.anchor_runs_completed and run.reveal:
-            if run.reveal not in party_knows:
-                party_does_not_know.append(f"Run reveal ({run.id}): {run.reveal}")
+    for beat in content.beats:
+        if beat.id not in state.beats_hit and beat.revelation:
+            if beat.revelation not in party_knows:
+                party_does_not_know.append(f"Beat reveal ({beat.id}): {beat.revelation}")
 
     npc_states = {}
     for npc in content.npcs:
@@ -185,21 +207,24 @@ def build_dm_context(content: CampaignContent, state: CampaignState, run_details
 
     threat_desc = content.threat.stages[state.threat_stage] if state.threat_stage < len(content.threat.stages) else "Maximum threat reached"
 
+    available_beats = get_available_beats(content, state)
+
     return {
-        "run": run_details,
+        "episode": episode_details,
         "campaign_context": {
             "name": content.name,
             "premise": content.premise,
             "tone": content.tone,
             "locations": [{"name": loc.name, "vibe": loc.vibe, "contains": loc.contains} for loc in content.locations]
         },
+        "available_beats": [{"id": b.id, "description": b.description, "is_finale": b.is_finale} for b in available_beats],
         "party_knows": party_knows,
         "party_does_not_know": party_does_not_know,
         "npc_states": npc_states,
         "threat_stage": state.threat_stage,
         "threat_name": content.threat.name,
         "threat_description": threat_desc,
-        "runs_completed": state.runs_completed,
+        "episodes_completed": state.episodes_completed,
         "locations_visited": state.locations_visited
     }
 

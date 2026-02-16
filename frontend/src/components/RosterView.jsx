@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useCampaignContext } from '../context/CampaignContext'
-import { fetchAvailableRuns, startRun } from '../api/content'
+import { fetchAvailableBeats } from '../api/content'
 import { updateCharacter } from '../api/characters'
 
 // Default values for backwards compatibility
@@ -73,10 +73,10 @@ function RosterView({ roster, onCreateCharacter, onSelectCharacter, onStartSessi
   const [levelUpChoice, setLevelUpChoice] = useState(null)
 
   // Authored campaign state
-  const [availableRuns, setAvailableRuns] = useState(null)
+  const [availableBeats, setAvailableBeats] = useState(null)
   const [hasContent, setHasContent] = useState(false)
-  const [selectedRun, setSelectedRun] = useState(null)
-  const [loadingRuns, setLoadingRuns] = useState(false)
+  const [selectedBeat, setSelectedBeat] = useState(null)
+  const [loadingBeats, setLoadingBeats] = useState(false)
 
   const toggleSelect = (id) => {
     if (selectedIds.includes(id)) {
@@ -86,49 +86,36 @@ function RosterView({ roster, onCreateCharacter, onSelectCharacter, onStartSessi
     }
   }
 
-  // Fetch available runs when opening modal
+  // Fetch available beats when opening modal
   const handleOpenStartModal = async () => {
     setShowStartModal(true)
-    setLoadingRuns(true)
+    setLoadingBeats(true)
 
     try {
-      const data = await fetchAvailableRuns(campaignId)
+      const data = await fetchAvailableBeats(campaignId)
 
       setHasContent(data.hasContent || false)
       if (data.hasContent) {
-        setAvailableRuns(data)
-        // Auto-select first anchor if available
-        if (data.anchors?.length > 0) {
-          setSelectedRun({ type: 'anchor', ...data.anchors[0] })
-        } else if (data.fillers?.length > 0) {
-          setSelectedRun({ type: 'filler', ...data.fillers[0] })
+        setAvailableBeats(data)
+        // Auto-select first beat if available
+        if (data.beats?.length > 0) {
+          setSelectedBeat(data.beats[0])
         }
       }
     } catch (err) {
-      console.error('Failed to fetch available runs:', err)
+      console.error('Failed to fetch available beats:', err)
       setHasContent(false)
     } finally {
-      setLoadingRuns(false)
+      setLoadingBeats(false)
     }
   }
 
-  const handleStartRun = async () => {
+  const handleStartEpisode = async () => {
     if (selectedIds.length === 0) return
 
-    if (hasContent && selectedRun) {
-      // Authored campaign: start the selected run
-      try {
-        await startRun(campaignId, {
-          run_type: selectedRun.type,
-          ...(selectedRun.type === 'anchor' ? { run_id: selectedRun.id } : { filler_index: selectedRun.index })
-        })
-
-        // Start session with run details
-        onStartSession(selectedRun.hook, selectedRun.goal || 'Complete the quest', selectedIds)
-      } catch (err) {
-        console.error('Failed to start run:', err)
-        return
-      }
+    if (hasContent && selectedBeat) {
+      // Authored campaign: start episode with selected beat context
+      onStartSession(selectedBeat.description, selectedBeat.id, selectedIds)
     } else {
       // Freestyle: use manual quest/location
       if (!quest || !location) return
@@ -139,8 +126,8 @@ function RosterView({ roster, onCreateCharacter, onSelectCharacter, onStartSessi
     setSelectedIds([])
     setQuest('')
     setLocation('')
-    setSelectedRun(null)
-    setAvailableRuns(null)
+    setSelectedBeat(null)
+    setAvailableBeats(null)
   }
 
   const handleLevelUp = async () => {
@@ -313,55 +300,35 @@ function RosterView({ roster, onCreateCharacter, onSelectCharacter, onStartSessi
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h2 style={{ marginBottom: '1rem' }}>Start New Episode</h2>
 
-            {loadingRuns ? (
-              <p style={{ color: 'var(--slate-muted)' }}>Loading available episodes...</p>
-            ) : hasContent && availableRuns ? (
-              // Authored campaign: show run selection
+            {loadingBeats ? (
+              <p style={{ color: 'var(--slate-muted)' }}>Loading available beats...</p>
+            ) : hasContent && availableBeats ? (
+              // Authored campaign: show beat selection
               <div>
-                {availableRuns.anchors?.length > 0 && (
+                {availableBeats.beats?.length > 0 ? (
                   <div className="form-group">
-                    <label>Story Episodes</label>
+                    <label>Available Beats</label>
                     <div className="run-options">
-                      {availableRuns.anchors.map(run => (
+                      {availableBeats.beats.map(beat => (
                         <div
-                          key={run.id}
-                          className={`run-option ${selectedRun?.id === run.id ? 'selected' : ''}`}
-                          onClick={() => setSelectedRun({ type: 'anchor', ...run })}
+                          key={beat.id}
+                          className={`run-option ${selectedBeat?.id === beat.id ? 'selected' : ''} ${beat.is_finale ? 'finale' : ''}`}
+                          onClick={() => setSelectedBeat(beat)}
                         >
-                          <div className="run-option-title">{run.hook}</div>
-                          <div className="run-option-goal">Goal: {run.goal}</div>
+                          <div className="run-option-title">{beat.description}{beat.is_finale ? ' (Finale)' : ''}</div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
-
-                {availableRuns.fillers?.length > 0 && (
-                  <div className="form-group">
-                    <label>Side Quests</label>
-                    <div className="run-options">
-                      {availableRuns.fillers.map(filler => (
-                        <div
-                          key={filler.index}
-                          className={`run-option filler ${selectedRun?.index === filler.index && selectedRun?.type === 'filler' ? 'selected' : ''}`}
-                          onClick={() => setSelectedRun({ type: 'filler', ...filler, hook: filler.seed })}
-                        >
-                          <div className="run-option-title">{filler.seed}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {!availableRuns.anchors?.length && !availableRuns.fillers?.length && (
+                ) : (
                   <p style={{ color: 'var(--amber-glow)', fontStyle: 'italic' }}>
-                    No episodes available. The campaign may be complete!
+                    No beats available. The campaign may be complete!
                   </p>
                 )}
 
                 <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'var(--twilight-purple)', borderRadius: '8px' }}>
                   <div style={{ fontSize: '0.85rem', color: 'var(--slate-muted)' }}>
-                    Episodes completed: {availableRuns.runs_completed} | Threat stage: {availableRuns.threat_stage + 1}
+                    Episodes completed: {availableBeats.episodes_completed} | Threat stage: {availableBeats.threat_stage + 1}
                   </div>
                 </div>
               </div>
@@ -406,8 +373,8 @@ function RosterView({ roster, onCreateCharacter, onSelectCharacter, onStartSessi
               </button>
               <button
                 className="btn btn-primary"
-                onClick={handleStartRun}
-                disabled={hasContent ? !selectedRun : (!quest || !location)}
+                onClick={handleStartEpisode}
+                disabled={hasContent ? !selectedBeat : (!quest || !location)}
               >
                 Begin Adventure!
               </button>

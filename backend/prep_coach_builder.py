@@ -125,44 +125,36 @@ def build_prep_coach_context(
 - Contains: {contains}
 """
 
-        # Anchor runs
-        runs = campaign_content.get('anchor_runs', [])
-        if runs:
-            content_section += "\n### Anchor Runs\n"
-            for run in runs:
-                must_include = ', '.join(run.get('must_include', [])) or 'None specified'
-                trigger = run.get('trigger', {})
-                trigger_desc = f"{trigger.get('type', 'unknown')}"
-                if trigger.get('value'):
-                    trigger_desc += f" ({trigger['value']})"
+        # Beats
+        beats = campaign_content.get('beats', [])
+        if beats:
+            content_section += "\n### Beats\n"
+            for beat in beats:
+                hints = ', '.join(beat.get('hints', [])) or 'None specified'
+                prereqs = ', '.join(beat.get('prerequisites', [])) or 'None'
+                finale_tag = " **(FINALE)**" if beat.get('is_finale') else ""
 
                 content_section += f"""
-**{run.get('id', 'unknown')}** - {trigger_desc}
-- Hook: {run.get('hook', 'Unknown')}
-- Goal: {run.get('goal', 'Unknown')}
-- Must include: {must_include}
-- Reveal: {run.get('reveal', 'Unknown')}
+**{beat.get('id', 'unknown')}**{finale_tag}
+- Description: {beat.get('description', 'Unknown')}
+- Hints: {hints}
+- Revelation: {beat.get('revelation', 'Unknown')}
+- Prerequisites: {prereqs}
 """
-
-        # Filler seeds
-        fillers = campaign_content.get('filler_seeds', [])
-        if fillers:
-            content_section += "\n### Filler Seeds\n"
-            for i, seed in enumerate(fillers):
-                content_section += f"  {i+1}. {seed}\n"
 
         sections.append(content_section)
 
     # Campaign state (if mid-playthrough)
-    if campaign_state and campaign_state.get('runs_completed', 0) > 0:
+    episodes = campaign_state.get('episodes_completed', campaign_state.get('runs_completed', 0)) if campaign_state else 0
+    if campaign_state and episodes > 0:
         state_section = """## Current Campaign State
 
 *A playthrough is in progress. Consider how guidance might vary based on progress.*
 """
         state_section += f"""
-- **Runs completed:** {campaign_state.get('runs_completed', 0)}
+- **Episodes completed:** {episodes}
 - **Threat stage:** {campaign_state.get('threat_stage', 0)}
-- **Anchor runs done:** {', '.join(campaign_state.get('anchor_runs_completed', [])) or 'None'}
+- **Beats hit:** {', '.join(campaign_state.get('beats_hit', campaign_state.get('anchor_runs_completed', []))) or 'None'}
 - **Facts known by party:** {len(campaign_state.get('facts_known', []))} items
 """
         sections.append(state_section)

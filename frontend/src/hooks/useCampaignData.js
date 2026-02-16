@@ -99,17 +99,7 @@ export function useCampaignData(campaignId) {
     if (!confirm(`End the run with "${outcome}"?`)) return
 
     try {
-      // First complete the authored run if applicable
-      try {
-        await contentApi.completeRun(campaignId, {
-          outcome,
-          facts_learned: [],
-          npcs_met: [],
-          locations_visited: [],
-        })
-      } catch (runErr) {
-        console.log('No authored run to complete (freestyle campaign)')
-      }
+      // Note: beat hits are tracked separately during episodes, not at session end
 
       // Then end the session
       await sessionsApi.endSession(campaignId, { outcome })
