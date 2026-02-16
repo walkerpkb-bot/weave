@@ -14,6 +14,61 @@ from campaign_schema import (
 from helpers import load_campaign_json, save_campaign_json
 
 
+def _migrate_campaign_data(data: dict) -> dict:
+    """Migrate old monolithic schema to refactored schema"""
+    migrated = dict(data)
+
+    # Migrate beats → anchor_runs
+    if "beats" in migrated and "anchor_runs" not in migrated:
+        anchor_runs = []
+        for i, beat in enumerate(migrated["beats"]):
+            trigger = {"type": "start", "value": None} if i == 0 else {"type": "after_runs_count", "value": str(i)}
+            anchor_runs.append({
+                "id": beat.get("id", f"beat_{i}"),
+                "hook": beat.get("description", ""),
+                "goal": beat.get("description", "")[:200],
+                "tone": None,
+                "must_include": beat.get("hints", []),
+                "reveal": beat.get("revelation", ""),
+                "trigger": trigger,
+            })
+        migrated["anchor_runs"] = anchor_runs
+        del migrated["beats"]
+
+    # Migrate threat.advances_each_episode_unless_beat_hit → threat.advance_on
+    if "threat" in migrated and "advance_on" not in migrated["threat"]:
+        if migrated["threat"].pop("advances_each_episode_unless_beat_hit", False):
+            migrated["threat"]["advance_on"] = "every_2_runs"
+        else:
+            migrated["threat"]["advance_on"] = "run_failed"
+
+    # Ensure filler_seeds exists
+    if "filler_seeds" not in migrated:
+        migrated["filler_seeds"] = [
+            "A routine delivery goes sideways",
+            "An unexpected encounter on the road",
+            "A mysterious stranger needs help",
+            "Bad weather forces a detour",
+            "A rival faction makes trouble",
+        ]
+
+    # Strip unknown fields from NPCs (e.g. unlocked_by)
+    if "npcs" in migrated:
+        for npc in migrated["npcs"]:
+            for key in list(npc.keys()):
+                if key not in ("name", "species", "role", "wants", "secret"):
+                    del npc[key]
+
+    # Strip unknown fields from locations
+    if "locations" in migrated:
+        for loc in migrated["locations"]:
+            for key in list(loc.keys()):
+                if key not in ("name", "vibe", "contains"):
+                    del loc[key]
+
+    return migrated
+
+
 def load_campaign_content(campaign_id: str):
     """Load authored campaign content"""
     data = load_campaign_json(campaign_id, "campaign.json")
@@ -22,7 +77,15 @@ def load_campaign_content(campaign_id: str):
     try:
         return CampaignContent(**data)
     except Exception:
-        return None
+        # Try migrating from old schema
+        try:
+            migrated = _migrate_campaign_data(data)
+            content = CampaignContent(**migrated)
+            # Save migrated data back so future loads work directly
+            save_campaign_json(campaign_id, "campaign.json", content.dict())
+            return content
+        except Exception:
+            return None
 
 def load_campaign_state(campaign_id: str) -> CampaignState:
     """Load runtime campaign state"""

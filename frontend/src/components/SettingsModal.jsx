@@ -161,9 +161,9 @@ function SettingsModal({ campaigns, onClose, onRefresh }) {
   const handleContinueEditing = async (campaign) => {
     setLoadingDraft(true)
     try {
-      // Fetch draft content
+      // Fetch draft content (falls back to published campaign.json)
       const data = await fetchDraft(campaign.id)
-      if (data.hasDraft && data.content) {
+      if (data.content) {
         setDraftInitialData(data.content)
       }
 
@@ -238,15 +238,13 @@ function SettingsModal({ campaigns, onClose, onRefresh }) {
                     </button>
                     {editingCampaign?.id === campaign.id && (
                       <div className="edit-menu">
-                        {campaign.isDraft && (
-                          <button
-                            className="edit-menu-item"
-                            onClick={() => handleContinueEditing(campaign)}
-                            disabled={loadingDraft}
-                          >
-                            Continue Editing
-                          </button>
-                        )}
+                        <button
+                          className="edit-menu-item"
+                          onClick={() => handleContinueEditing(campaign)}
+                          disabled={loadingDraft}
+                        >
+                          {campaign.isDraft ? 'Continue Editing' : 'Edit Content'}
+                        </button>
                         <button
                           className="edit-menu-item"
                           onClick={handleAddArt}

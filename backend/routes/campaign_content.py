@@ -19,6 +19,7 @@ from campaign_logic import (
     get_available_runs,
     select_next_run,
     build_dm_context,
+    _migrate_campaign_data,
 )
 
 router = APIRouter()
@@ -77,11 +78,20 @@ def get_campaign_draft(campaign_id: str):
     """Get campaign draft content for resuming editing"""
     draft = load_campaign_json(campaign_id, "draft.json")
     if draft:
+        # Handle old format where draft.json was {content: {...}, system: {...}}
+        if "content" in draft and isinstance(draft["content"], dict) and "name" in draft["content"]:
+            draft = draft["content"]
+        # Migrate old schema (beats → anchor_runs, etc.)
+        if "beats" in draft or ("threat" in draft and "advance_on" not in draft.get("threat", {})):
+            draft = _migrate_campaign_data(draft)
         return {"hasDraft": True, "content": draft}
 
     # Fall back to campaign.json if exists
     content = load_campaign_json(campaign_id, "campaign.json")
     if content:
+        # Migrate if needed
+        if "beats" in content or ("threat" in content and "advance_on" not in content.get("threat", {})):
+            content = _migrate_campaign_data(content)
         return {"hasDraft": False, "content": content}
 
     return {"hasDraft": False, "content": None}

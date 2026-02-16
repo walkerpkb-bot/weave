@@ -67,6 +67,7 @@ function CharacterSheet({ character, onSave, onCancel, systemConfig, availableAr
   const [species, setSpecies] = useState(character?.species || speciesList[0]?.name || '')
   const [stats, setStats] = useState(getInitialStats)
   const [arcId, setArcId] = useState(character?.arcId || '')
+  const [backstory, setBackstory] = useState(character?.notes || '')
 
   // Update species when speciesList changes
   useEffect(() => {
@@ -100,7 +101,7 @@ function CharacterSheet({ character, onSave, onCancel, systemConfig, availableAr
       maxThreads: magicConfig.starting,
       gear: [],
       weavesKnown: [],
-      notes: '',
+      notes: backstory,
       ...(arcId ? { arcId } : {})
     })
   }
@@ -203,6 +204,17 @@ function CharacterSheet({ character, onSave, onCancel, systemConfig, availableAr
             )
           })}
         </div>
+      </div>
+
+      <div className="form-group">
+        <label>Backstory <span style={{ fontSize: '0.8rem', color: 'var(--slate-muted)' }}>(optional)</span></label>
+        <textarea
+          value={backstory}
+          onChange={(e) => setBackstory(e.target.value)}
+          placeholder="Who is this character? Where do they come from?"
+          rows={3}
+          maxLength={500}
+        />
       </div>
 
       <div style={{

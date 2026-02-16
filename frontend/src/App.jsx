@@ -21,6 +21,7 @@ function App() {
   const [view, setView] = useState('session')
   const [selectedCharacter, setSelectedCharacter] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [userSwitchedAway, setUserSwitchedAway] = useState(false)
 
   const { campaigns, serverActiveCampaignId, refresh: refreshCampaigns } = useCampaigns()
   const {
@@ -30,9 +31,9 @@ function App() {
     reset,
   } = useCampaignData(activeCampaignId)
 
-  // Auto-select if server has an active campaign and we don't
+  // Auto-select on initial load if server has an active campaign
   useEffect(() => {
-    if (serverActiveCampaignId && !activeCampaignId) {
+    if (serverActiveCampaignId && !activeCampaignId && !userSwitchedAway) {
       selectCampaign(serverActiveCampaignId)
     }
   }, [serverActiveCampaignId])
@@ -56,6 +57,7 @@ function App() {
   }, [view])
 
   const selectCampaign = async (campaignId) => {
+    setUserSwitchedAway(false)
     try {
       await campaignsApi.selectCampaign(campaignId)
       const campaign = campaigns.find(c => c.id === campaignId) ||
@@ -70,6 +72,7 @@ function App() {
   }
 
   const switchCampaign = () => {
+    setUserSwitchedAway(true)
     setCurrentView('campaign-select')
     setActiveCampaignId(null)
     reset()
