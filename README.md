@@ -1,329 +1,268 @@
 # Weave
 
-A web-based companion app for playing tabletop roguelike RPGs. Originally built for Bloomburrow Adventures, now supports fully customizable campaign systems for any setting.
+A web-based companion app for episodic tabletop RPGs. Author campaign stories with prerequisite-based beats, then play through them with an AI Dungeon Master, scene illustrations, and full party/town management. Supports fully customizable game systems for any setting.
 
 ## Features
 
-- **Campaign System**: Support for multiple campaigns with full data isolation
+- **Beat-Based Storytelling**: Author story beats with prerequisites, unlocking conditions, expiry timers, and finale flags — the AI weaves them into episodic sessions
+- **AI Dungeon Master**: Claude-powered DM that adapts to your authored content, party state, and campaign progress
+- **Scene Illustrations**: Flux image generation during play — Claude crafts optimized prompts, Replicate renders them
+- **Campaign Authoring**: Full content editor with NPCs, locations, threats, and character arcs
+- **DM Prep Coach**: AI assistant for campaign planning — author notes flow directly into gameplay DM context
 - **Customizable Game Systems**: Configure species, stats, resources, currency, buildings, leveling, and mechanics per campaign
-- **Templates**: Start from pre-built templates (Bloomburrow, Generic Fantasy) or build from scratch
-- **Episodic Adventures**: Author story episodes with triggers and filler seeds the AI expands into full sessions
-- **Character Roster**: Create and manage characters with campaign-specific species and stats
-- **Town Management**: Track currency, build upgrades, manage shared stash
-- **Session Runner**: AI-powered Dungeon Master using Claude API
-- **AI Scene Illustrations**: Generate atmospheric scene images during play via Replicate
-- **Dice Roller**: Digital dice with automatic threshold checking
-- **Party Tracker**: Real-time HP and resource management during episodes
-- **DM Prep Coach**: AI-assisted campaign preparation with author notes that flow into gameplay DM context
-- **Docker Support**: Run the full stack with `docker compose up`
+- **Character Roster**: Create and manage characters with campaign-specific species, stats, and arc progression
+- **Town Management**: Currency, building upgrades, shared item stash
+- **Session Runner**: Party HP/resource tracking, dice roller with threshold checking, episode phases
+- **Templates**: Start from Bloomburrow (cozy woodland fantasy) or Generic Fantasy, or build from scratch
+- **Multi-Campaign**: Full data isolation between campaigns
+- **Docker Support**: `docker compose up` for the full stack
 
-## Quick Start (Docker)
+## Quick Start
+
+### Local Development
 
 ```bash
-# Clone and configure
-cp backend/.env.example backend/.env
-# Edit backend/.env with your API keys
-
-# Start everything
-docker compose up
-```
-
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000
-
-Campaign data persists in a Docker volume (`backend-data`).
-
-## Manual Setup
-
-### Prerequisites
-
-- Python 3.9+
-- Node.js 18+
-- Anthropic API key
-- Replicate API key (for image generation)
-
-### Backend
-
-```bash
+# Backend
 cd backend
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-
-# Set up environment
-cp .env.example .env
-# Edit .env and add your API keys
-
-# Run the server
+cp .env.example .env  # Add ANTHROPIC_API_KEY and REPLICATE_API_TOKEN
 uvicorn main:app --reload --port 8000
-```
 
-### Frontend
-
-```bash
+# Frontend (separate terminal)
 cd frontend
 npm install
 npm run dev
 ```
 
-### Running Tests
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+- Frontend proxies `/api` to the backend via vite.config.js
+
+### Docker
+
+```bash
+cp backend/.env.example backend/.env
+# Edit backend/.env with your API keys
+docker compose up
+```
+
+Campaign data persists in a Docker volume (`backend-data`).
+
+### Prerequisites
+
+- Python 3.9+
+- Node.js 18+
+- `ANTHROPIC_API_KEY` — Claude API for DM and Prep Coach
+- `REPLICATE_API_TOKEN` — Flux image generation (optional, for scene illustrations)
+
+### Tests
 
 ```bash
 cd backend
-.venv/bin/python -m pytest tests/ -v
+source venv/bin/activate
+python -m pytest tests/ -v
 ```
 
-104 tests covering campaign logic, schema validation, session/episode lifecycle, and town/character CRUD.
+93 tests covering beat logic, schema validation, session/beat lifecycle, routes, and town/character CRUD.
 
-### Data Migration (if upgrading from pre-campaign version)
+## How It Works
 
-```bash
-cd backend
-python migrate_to_campaigns.py
-```
+### Two-Layer Campaign Configuration
 
-This migrates your roster, town, stash, and session data into a "Bloomburrow" campaign.
+**System Config** (`system.json`) defines game mechanics — species, stats, resources, currency, buildings, leveling, dice thresholds, enemy tiers, art style, world lore, and DM tone. Start from a template or build from scratch.
+
+**Campaign Content** (`campaign.json`) defines the story:
+
+| Section | What it contains |
+|---------|-----------------|
+| `name`, `premise`, `tone` | Campaign identity |
+| `threat` | Escalating danger with named stages, auto-advances each episode unless a beat is hit |
+| `npcs` | Named characters with species, role, wants, and a secret |
+| `locations` | Key places with vibe descriptions and content tags |
+| `beats` | Story beats — the core progression system (see below) |
+| `character_arcs` | Optional player arcs with milestones and rewards |
+
+### Beats
+
+Beats are the building blocks of campaign progression. Each beat has:
+
+- **description** — what happens in this beat
+- **hints** — things the AI must weave into the episode (up to 5)
+- **revelation** — what the party learns when the beat is hit (added to "facts known")
+- **prerequisites** — other beat IDs that must be hit first
+- **unlocked_by** — episode count gate (e.g., `episode:3`)
+- **closes_after_episodes** — expiry timer
+- **is_finale** — marks the campaign-ending beat
+
+The system dynamically calculates which beats are available based on the current state. When all beats are hit, a finale beat is completed, or the threat reaches max stage, the campaign is complete.
+
+### Session Flow
+
+1. **Start Episode** — select available beats or play freestyle
+2. **Adventure** — chat with the AI DM, which has full context: campaign content, party state, available beats, author notes, and session history
+3. **Roll Dice** — physical or digital, with automatic threshold checking
+4. **Track Party** — click hearts/resources to update HP and abilities in real time
+5. **Generate Scenes** — toggle illustration mode for AI-crafted scene images
+6. **End Episode** — victory (2 XP), retreat (1 XP), or failed (0 XP)
+
+### DM Prep
+
+Before playing, use the Prep Coach:
+- Chat with Claude about NPC voices, pacing, secrets, and scene ideas
+- Create categorized author notes (voice, pacing, secret, reminder, general)
+- Pin useful insights from conversations
+- Everything flows into the gameplay DM's system prompt
 
 ## Project Structure
 
 ```
 weave/
-├── docker-compose.yml          # Full stack orchestration
-├── .dockerignore
+├── docker-compose.yml
 ├── backend/
-│   ├── Dockerfile
-│   ├── docker-entrypoint.sh    # Seeds templates into data volume
-│   ├── main.py                 # FastAPI app init, CORS, router includes
-│   ├── config.py               # Path constants (DATA_DIR, PROMPTS_DIR, etc.)
-│   ├── models.py               # All Pydantic request/response models
-│   ├── helpers.py              # File I/O helpers (load_json, save_json, etc.)
-│   ├── campaign_logic.py       # Campaign content/state/episode logic
-│   ├── campaign_schema.py      # Campaign data models and validation
-│   ├── dm_context_builder.py   # Builds DM prompts from campaign config
-│   ├── prep_coach_builder.py   # Builds prompts for DM Prep Coach
-│   ├── migrate_to_campaigns.py # Data migration script
+│   ├── main.py                 # FastAPI app, CORS, router includes
+│   ├── config.py               # Path constants
+│   ├── models.py               # Pydantic request/response models
+│   ├── helpers.py              # JSON file I/O helpers
+│   ├── campaign_schema.py      # Beat, Threat, CampaignContent, CampaignState models
+│   ├── campaign_logic.py       # Beat availability, expiry, threat advancement, DM context
+│   ├── dm_context_builder.py   # Builds DM system prompts from campaign config
+│   ├── prep_coach_builder.py   # Builds Prep Coach prompts
+│   ├── migrate_episodes.py     # Data migration (anchor_runs → beats)
 │   ├── requirements.txt
 │   ├── routes/
-│   │   ├── templates.py        # Template listing (2 routes)
-│   │   ├── campaigns.py        # Campaign CRUD, select, banner, system config (10 routes)
-│   │   ├── campaign_content.py # Content, drafts, state, episodes, DM context (10 routes)
-│   │   ├── dm_prep.py          # DM prep notes, pins, conversation, coach (8 routes)
-│   │   ├── characters.py       # Character CRUD (5 routes)
-│   │   ├── town.py             # Town + stash management (4 routes)
-│   │   ├── sessions.py         # Session lifecycle + dice (5 routes)
-│   │   └── dm_ai.py            # DM message + image generation (3 routes)
+│   │   ├── templates.py        # Template listing
+│   │   ├── campaigns.py        # Campaign CRUD, select, banner, system config
+│   │   ├── campaign_content.py # Content, drafts, state, beats, DM context
+│   │   ├── dm_prep.py          # Prep notes, pins, coach conversation
+│   │   ├── characters.py       # Character CRUD
+│   │   ├── town.py             # Town + stash
+│   │   ├── sessions.py         # Session lifecycle + dice
+│   │   ├── dm_ai.py            # DM chat + image generation
+│   │   └── generate.py         # AI-powered field generation
 │   ├── tests/
-│   │   ├── conftest.py         # Shared fixtures (data_dir, campaign_dir, client)
-│   │   ├── test_logic.py       # Pure logic: triggers, available runs, DM context
-│   │   ├── test_schema.py      # Pydantic validation: content, threat, triggers
-│   │   ├── test_routes.py      # Session lifecycle, episode routes, dice
+│   │   ├── conftest.py         # Shared fixtures
+│   │   ├── test_schema.py      # Beat/Threat/CampaignContent validation
+│   │   ├── test_logic.py       # Beat availability, expiry, threat, DM context
+│   │   ├── test_routes.py      # Session and beat lifecycle routes
 │   │   └── test_town.py        # Town, character, stash, campaign CRUD
-│   ├── data/
-│   │   ├── templates/          # Pre-built system templates
-│   │   │   ├── bloomburrow.json
-│   │   │   └── default.json
-│   │   └── campaigns/          # Per-campaign data
-│   │       └── {campaign_id}/
-│   │           ├── roster.json
-│   │           ├── town.json
-│   │           ├── stash.json
-│   │           ├── system.json
-│   │           ├── campaign.json
-│   │           ├── state.json
-│   │           ├── dm_prep.json
-│   │           ├── current_session.json
-│   │           └── images/
-│   └── prompts/
-│       ├── dm_system.md
-│       ├── rules_reference.md
-│       └── bloomburrow_lore.md
+│   ├── data/                   # All campaign data (gitignored)
+│   │   ├── campaigns.json      # Campaign registry
+│   │   ├── templates/          # System templates (bloomburrow, default)
+│   │   └── campaigns/{id}/     # Per-campaign data
+│   │       ├── system.json     # Game system config
+│   │       ├── campaign.json   # Authored story content
+│   │       ├── state.json      # Runtime state (beats hit, threat, facts)
+│   │       ├── roster.json     # Characters
+│   │       ├── town.json       # Town state
+│   │       ├── stash.json      # Shared items
+│   │       ├── dm_prep.json    # Author notes + coach conversation
+│   │       ├── current_session.json
+│   │       ├── draft.json      # Content draft (pre-validation)
+│   │       └── images/         # Generated scene images
+│   └── prompts/                # Markdown prompt templates
 ├── frontend/
-│   ├── Dockerfile              # Multi-stage: npm build → nginx
-│   ├── nginx.conf              # Proxies /api/ to backend, SPA fallback
+│   ├── vite.config.js          # Dev proxy: /api → localhost:8000
 │   ├── src/
-│   │   ├── App.jsx             # View routing, hooks, context provider
-│   │   ├── styles.css
-│   │   ├── api/
-│   │   │   ├── client.js       # Centralized apiFetch() + apiUpload() helpers
-│   │   │   ├── campaigns.js    # Campaign CRUD, select, banner, system config
-│   │   │   ├── characters.js   # Character CRUD
-│   │   │   ├── sessions.js     # Session lifecycle, dice
-│   │   │   ├── town.js         # Town + stash
-│   │   │   ├── dm.js           # DM message
-│   │   │   ├── dmPrep.js       # DM prep notes, pins, conversation, coach
-│   │   │   ├── images.js       # Image generation
-│   │   │   ├── templates.js    # Template listing
-│   │   │   └── content.js      # Campaign content, drafts, episodes
-│   │   ├── context/
-│   │   │   └── CampaignContext.jsx  # CampaignProvider + useCampaignContext
-│   │   ├── hooks/
-│   │   │   ├── useCampaigns.js      # Campaign list fetching
-│   │   │   └── useCampaignData.js   # In-campaign state + action handlers
+│   │   ├── App.jsx             # View routing, context provider
+│   │   ├── styles.css          # Global styles (two themes)
+│   │   ├── api/                # API client modules
+│   │   ├── context/            # CampaignContext provider
+│   │   ├── hooks/              # useCampaigns, useCampaignData
 │   │   └── components/
-│   │       ├── CampaignSelector.jsx
+│   │       ├── CampaignSelector.jsx  # Landing page
 │   │       ├── CampaignCard.jsx
-│   │       ├── CampaignForm.jsx
-│   │       ├── SettingsModal.jsx
-│   │       ├── InCampaignHeader.jsx
-│   │       ├── ChatWindow.jsx
-│   │       ├── ImagePanel.jsx
-│   │       ├── PartyStatus.jsx
-│   │       ├── RosterView.jsx
-│   │       ├── CharacterSheet.jsx
-│   │       ├── TownView.jsx
-│   │       ├── SessionPanel.jsx
+│   │       ├── CampaignForm.jsx      # Full system + content editor
+│   │       ├── ChatWindow.jsx        # DM chat interface
+│   │       ├── RosterView.jsx        # Characters + episode start
+│   │       ├── CharacterSheet.jsx    # Character creation/editing
+│   │       ├── TownView.jsx          # Buildings + currency
+│   │       ├── SessionPanel.jsx      # Session controls
+│   │       ├── PartyStatus.jsx       # HP/resource tracking
+│   │       ├── ImagePanel.jsx        # Scene illustrations
 │   │       ├── DiceRoller.jsx
-│   │       ├── DMPrepSection.jsx
+│   │       ├── DMPrepSection.jsx     # Author notes + prep coach
 │   │       └── PrepCoachChat.jsx
 │   └── package.json
 └── README.md
 ```
 
-## Campaign System Configuration
+## API
 
-Each campaign can have a fully customized game system:
+49 endpoints across 9 route modules. Key endpoints:
 
-### System Config (`system.json`)
-
-| Section | What it configures |
-|---------|-------------------|
-| `game_name` | Display name for the game system |
-| `player_context` | Who's playing (e.g., "parent and child") - used in DM prompts |
-| `species` | Playable species/races with trait names and descriptions |
-| `stats` | Stat names, colors, point allocation rules |
-| `resources` | Health and magic names, symbols, starting/max values |
-| `currency` | Currency name, symbol, starting amount |
-| `buildings` | Town buildings with costs and descriptions |
-| `leveling` | Max level, XP thresholds, level-up rewards |
-| `mechanics` | Dice type, success/partial thresholds, enemy tiers |
-| `art_style` | Image generation style prompt |
-| `lore` | World lore injected into DM context |
-| `dm_tone` | DM personality and tone guidance |
-
-### Content Config (`campaign.json`)
-
-| Section | What it contains |
-|---------|-----------------|
-| `name` | Campaign name |
-| `premise` | Campaign premise/hook |
-| `tone` | Overall tone guidance |
-| `threat` | Escalating threat with stages |
-| `npcs` | Named NPCs with roles, wants, and secrets |
-| `locations` | Key locations with vibes and contents |
-| `anchor_runs` | Scripted story episodes with triggers |
-| `filler_seeds` | One-liner prompts the AI expands into side episodes |
-
-## API Endpoints
-
-### Campaign Endpoints
+### Campaigns & Content
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/campaigns` | GET | List all campaigns with stats |
-| `/campaigns` | POST | Create new campaign |
-| `/campaigns/{id}` | GET | Get campaign details |
-| `/campaigns/{id}` | PUT | Update campaign metadata |
-| `/campaigns/{id}` | DELETE | Delete campaign and data |
+| `/campaigns` | GET/POST | List or create campaigns |
+| `/campaigns/{id}` | GET/PUT/DELETE | Manage campaign |
 | `/campaigns/{id}/select` | PUT | Set active campaign |
-| `/campaigns/{id}/banner` | GET/POST | Get or upload campaign banner |
-| `/campaigns/{id}/system` | GET/PUT | Get or update system config |
-| `/campaigns/{id}/content` | GET/POST | Get or save campaign content |
-| `/campaigns/{id}/draft` | GET/POST | Get or save draft content |
-| `/campaigns/{id}/dm-prep` | GET | Get DM prep notes and conversation |
-| `/campaigns/{id}/dm-prep/message` | POST | Chat with Prep Coach AI |
-| `/campaigns/{id}/dm-prep/note` | POST | Create author note |
-| `/campaigns/{id}/dm-prep/note/{note_id}` | PUT/DELETE | Update or delete note |
-| `/campaigns/{id}/dm-prep/pin` | POST | Pin insight from conversation |
-| `/campaigns/{id}/dm-prep/pin/{pin_id}` | DELETE | Unpin insight |
-| `/campaigns/{id}/dm-prep/conversation` | DELETE | Clear conversation history |
-
-### Template Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/templates` | GET | List available system templates |
-| `/templates/{name}` | GET | Get specific template |
-
-### Campaign-Scoped Game Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/campaigns/{id}/characters` | GET/POST | List or create characters |
-| `/campaigns/{id}/characters/{char_id}` | GET/PUT/DELETE | Manage single character |
-| `/campaigns/{id}/town` | GET/PUT | Get or update town state |
-| `/campaigns/{id}/stash` | GET/PUT | Manage shared item stash |
-| `/campaigns/{id}/session` | GET | Get current session |
-| `/campaigns/{id}/session/start` | POST | Start a new episode |
-| `/campaigns/{id}/session/update` | PUT | Update session state |
-| `/campaigns/{id}/session/end` | POST | End episode (victory/retreat/failed) |
-| `/campaigns/{id}/available-runs` | GET | List available story and filler episodes |
-| `/campaigns/{id}/next-run` | GET | Get next recommended episode |
-| `/campaigns/{id}/start-run` | POST | Start a story or filler episode |
-| `/campaigns/{id}/complete-run` | POST | Complete episode, update campaign state |
-| `/campaigns/{id}/state` | GET | Get campaign runtime state |
+| `/campaigns/{id}/system` | GET/PUT | Game system config |
+| `/campaigns/{id}/content` | GET/POST/PUT | Campaign story content |
+| `/campaigns/{id}/draft` | GET/POST | Draft content (no validation) |
+| `/campaigns/{id}/available-beats` | GET | List currently available beats |
+| `/campaigns/{id}/hit-beat` | POST | Record a beat completion |
+| `/campaigns/{id}/state` | GET | Campaign runtime state |
 | `/campaigns/{id}/state/reset` | POST | Reset campaign progress |
-| `/campaigns/{id}/dm-context` | GET | Get current DM context for active episode |
-| `/campaigns/{id}/dm/message` | POST | Send message to AI DM |
-| `/campaigns/{id}/dice/roll` | POST | Log a dice roll |
+| `/campaigns/{id}/dm-context` | GET | Current DM context |
+
+### Gameplay
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/campaigns/{id}/dm/message` | POST | Chat with AI DM |
 | `/campaigns/{id}/image/generate` | POST | Generate scene image |
+| `/campaigns/{id}/session` | GET | Current session state |
+| `/campaigns/{id}/session/start` | POST | Start episode |
+| `/campaigns/{id}/session/end` | POST | End episode |
+| `/campaigns/{id}/dice/roll` | POST | Log dice roll |
+| `/campaigns/{id}/characters` | GET/POST | List or create characters |
+| `/campaigns/{id}/town` | GET/PUT | Town state |
+| `/campaigns/{id}/stash` | GET/PUT | Shared item stash |
 
-## How to Play
+### DM Prep
 
-1. **Select Campaign**: Choose or create a campaign from the landing page
-2. **Configure System** (optional): Use Full Setup to customize species, stats, buildings, etc.
-3. **Create Characters**: Go to the Roster tab and create 1-2 characters
-4. **Start an Episode**: Select characters and click "Start Episode", choose a story or filler episode
-5. **Adventure**: Chat with the AI DM in the Adventure tab
-6. **Roll Dice**: Use physical dice and input results, or use the digital roller
-7. **Track Status**: Click hearts/resources to update as you take damage or use abilities
-8. **Generate Scenes**: Toggle illustration mode for AI-generated scene art
-9. **End Episode**: Victory, retreat, or fail - XP and loot are awarded accordingly
-10. **Build Town**: Spend currency in the Town tab to unlock new services
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/campaigns/{id}/dm-prep` | GET | Get prep data |
+| `/campaigns/{id}/dm-prep/message` | POST | Chat with Prep Coach |
+| `/campaigns/{id}/dm-prep/note` | POST | Create author note |
+| `/campaigns/{id}/dm-prep/pin` | POST | Pin conversation insight |
 
-## Creating Custom Campaigns
+### AI Generation
 
-### Quick Create
-Just enter a name - uses default fantasy settings. Good for improvised sessions.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/campaigns/{id}/generate-fields` | POST | AI-generate flagged campaign fields |
+| `/generate-fields` | POST | Standalone field generation |
+| `/templates` | GET | List system templates |
 
-### Full Setup
-Use the campaign form to configure everything:
+## Tech Stack
 
-1. **System Tab**: Configure game mechanics
-   - General: Game name, player context
-   - Species: Define playable species with unique traits
-   - Stats: Name your stats, set point allocation rules
-   - Resources: Configure health/magic systems
-   - Buildings: Define town buildings and costs
-   - Leveling: Set XP thresholds and rewards
-   - Mechanics: Dice, thresholds, enemy tiers
-   - Content: Art style, lore, DM tone
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python 3.9+, FastAPI, Pydantic |
+| Frontend | React 18, Vite 5, vanilla CSS |
+| AI DM | Claude Sonnet 4 (via Anthropic SDK) |
+| Image Gen | Flux Schnell (via Replicate) |
+| Data | JSON files on disk (no database) |
+| Deployment | Docker Compose (nginx + uvicorn) |
 
-2. **Content Tab**: Author campaign content
-   - Overview: Name, premise, tone
-   - Threat: Escalating danger with stages
-   - NPCs: Characters with secrets
-   - Locations: Places to explore
-   - Episodes: Scripted story episodes with triggers and filler seeds
+## Data
 
-3. **DM Prep Tab**: Prepare guidance for DMs
-   - Chat with the Prep Coach AI to think through NPC voices, pacing, secrets
-   - Create author notes that get injected into the gameplay DM's context
-   - Pin useful insights from conversations
-   - Notes are categorized: voice, pacing, secret, reminder, general
+All campaign data lives in `backend/data/` as JSON files. Data is gitignored — back it up manually. Each campaign gets its own directory with full isolation.
 
-### Using Templates
+To migrate data from the old anchor_runs format:
 
-Start from a template and customize:
-- **Bloomburrow Adventures**: Cozy woodland fantasy with anthropomorphic animals
-- **Generic Fantasy**: Classic D&D-style with humans, elves, dwarves
+```bash
+cd backend
+python migrate_episodes.py
+```
 
 ## Themes
 
-The app features two distinct color themes:
 - **Clean Slate**: Dark charcoal with gold accents (campaign selector)
 - **Twilight Forest**: Plum/purple with amber glow (in-campaign play)
 
