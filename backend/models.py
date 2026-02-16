@@ -98,3 +98,10 @@ class DMPrepPinRequest(BaseModel):
     content: str
     category: str = "general"
     related_to: Optional[str] = None
+
+
+class GenerateFieldsRequest(BaseModel):
+    content: dict
+    generate: dict  # {threat: {name: bool}, npcs: [{field: bool}], locations: [...], anchor_runs: [...], character_arcs: [...]}
+    available_species: list = []
+    available_tags: list = []

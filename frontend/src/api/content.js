@@ -40,3 +40,15 @@ export const completeRun = (campaignId, data) =>
     method: 'POST',
     body: JSON.stringify(data),
   })
+
+export const generateFields = (campaignId, payload) =>
+  apiFetch(`/campaigns/${campaignId}/generate-fields`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export const generateFieldsStandalone = (payload) =>
+  apiFetch('/generate-fields', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })

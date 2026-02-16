@@ -10,6 +10,7 @@ export function useCampaignData(campaignId) {
   const [roster, setRoster] = useState([])
   const [town, setTown] = useState(null)
   const [systemConfig, setSystemConfig] = useState(null)
+  const [campaignContent, setCampaignContent] = useState(null)
 
   const fetchSystemConfig = useCallback(async () => {
     if (!campaignId) return
@@ -48,6 +49,16 @@ export function useCampaignData(campaignId) {
       setTown(data)
     } catch (err) {
       console.error('Failed to fetch town:', err)
+    }
+  }, [campaignId])
+
+  const fetchContent = useCallback(async () => {
+    if (!campaignId) return
+    try {
+      const data = await contentApi.fetchContent(campaignId)
+      setCampaignContent(data)
+    } catch (err) {
+      console.error('Failed to fetch campaign content:', err)
     }
   }, [campaignId])
 
@@ -115,6 +126,7 @@ export function useCampaignData(campaignId) {
     setRoster([])
     setTown(null)
     setSystemConfig(null)
+    setCampaignContent(null)
   }, [])
 
   return {
@@ -122,10 +134,12 @@ export function useCampaignData(campaignId) {
     roster,
     town,
     systemConfig,
+    campaignContent,
     fetchSystemConfig,
     fetchSession,
     fetchRoster,
     fetchTown,
+    fetchContent,
     handleCreateCharacter,
     handleStartSession,
     handleUpdateSession,

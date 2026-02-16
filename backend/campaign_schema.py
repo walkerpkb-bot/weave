@@ -419,6 +419,19 @@ class Threat(BaseModel):
         return v
 
 
+class ArcReward(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+    description: str = Field(..., min_length=5, max_length=200)
+
+
+class CharacterArc(BaseModel):
+    id: str = Field(..., pattern=r'^[a-z][a-z0-9_]*$', max_length=30)
+    name: str = Field(..., min_length=1, max_length=50)
+    suggested_for: list[str] = Field(default_factory=list)
+    milestones: list[str] = Field(..., min_items=2, max_items=5)
+    reward: ArcReward
+
+
 class CampaignContent(BaseModel):
     """The complete authored campaign content"""
     name: str = Field(..., min_length=1, max_length=50)
@@ -430,7 +443,8 @@ class CampaignContent(BaseModel):
     locations: list[Location] = Field(..., min_items=2, max_items=10)
     anchor_runs: list[AnchorRun] = Field(..., min_items=3, max_items=10)
     filler_seeds: list[str] = Field(..., min_items=5, max_items=15)
-    
+    character_arcs: list[CharacterArc] = Field(default_factory=list)
+
     @validator('filler_seeds')
     def validate_filler_seeds(cls, v):
         for seed in v:

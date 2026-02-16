@@ -2117,3 +2117,78 @@ body {
   padding: 0.25rem 0.5rem;
   font-size: 0.8rem;
 }
+
+/* === DM Decides === */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.dm-decides-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--slate-gold);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.dm-decides-label input[type="checkbox"] {
+  accent-color: var(--slate-gold);
+  cursor: pointer;
+}
+
+.dm-decides-field {
+  position: relative;
+}
+
+.dm-decides-field.checked input,
+.dm-decides-field.checked textarea,
+.dm-decides-field.checked select {
+  opacity: 0.45;
+  border-color: var(--slate-gold);
+  pointer-events: none;
+}
+
+.dm-decides-tags {
+  position: relative;
+}
+
+.dm-decides-tags.checked .tag-btn {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, #d4af37, #c5960f);
+  color: #1a1a2e;
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-gold:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e0c04a, #d4af37);
+  transform: translateY(-1px);
+}
+
+.btn-gold:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.generate-error {
+  color: #e08080;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(192, 64, 64, 0.15);
+  border-radius: 4px;
+}

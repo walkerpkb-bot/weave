@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from config import IMAGES_DIR
-from routes import templates, campaigns, campaign_content, dm_prep, characters, town, sessions, dm_ai
+from routes import templates, campaigns, campaign_content, dm_prep, characters, town, sessions, dm_ai, generate
 
 # Load environment variables from .env file
 load_dotenv()
@@ -37,6 +37,7 @@ app.include_router(characters.router)
 app.include_router(town.router)
 app.include_router(sessions.router)
 app.include_router(dm_ai.router)
+app.include_router(generate.router)
 
 
 @app.get("/")

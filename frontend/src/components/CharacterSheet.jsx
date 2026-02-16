@@ -27,7 +27,7 @@ const DEFAULT_RESOURCES = {
   magic: { name: 'Threads', symbol: '✦', starting: 3, max: 5 }
 }
 
-function CharacterSheet({ character, onSave, onCancel, systemConfig }) {
+function CharacterSheet({ character, onSave, onCancel, systemConfig, availableArcs = [] }) {
   // Extract config or use defaults
   const speciesList = systemConfig?.species || DEFAULT_SPECIES
   const statsConfig = systemConfig?.stats || DEFAULT_STATS
@@ -66,6 +66,7 @@ function CharacterSheet({ character, onSave, onCancel, systemConfig }) {
   const [name, setName] = useState(character?.name || '')
   const [species, setSpecies] = useState(character?.species || speciesList[0]?.name || '')
   const [stats, setStats] = useState(getInitialStats)
+  const [arcId, setArcId] = useState(character?.arcId || '')
 
   // Update species when speciesList changes
   useEffect(() => {
@@ -99,7 +100,8 @@ function CharacterSheet({ character, onSave, onCancel, systemConfig }) {
       maxThreads: magicConfig.starting,
       gear: [],
       weavesKnown: [],
-      notes: ''
+      notes: '',
+      ...(arcId ? { arcId } : {})
     })
   }
 
@@ -137,6 +139,41 @@ function CharacterSheet({ character, onSave, onCancel, systemConfig }) {
           </div>
         )}
       </div>
+
+      {availableArcs.length > 0 && (
+        <div className="form-group">
+          <label>Character Arc</label>
+          <select value={arcId} onChange={(e) => setArcId(e.target.value)}>
+            <option value="">None</option>
+            {availableArcs.map(arc => (
+              <option key={arc.id} value={arc.id}>{arc.name}</option>
+            ))}
+          </select>
+          {arcId && (() => {
+            const arc = availableArcs.find(a => a.id === arcId)
+            if (!arc) return null
+            return (
+              <div style={{
+                marginTop: '0.5rem',
+                fontSize: '0.85rem',
+                background: 'var(--parchment)',
+                padding: '0.75rem',
+                borderRadius: '6px'
+              }}>
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <strong>Milestones:</strong>
+                  <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
+                    {arc.milestones.map((m, i) => <li key={i}>{m}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <strong>Reward:</strong> {arc.reward.name} — {arc.reward.description}
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+      )}
 
       <div className="form-group">
         <label>

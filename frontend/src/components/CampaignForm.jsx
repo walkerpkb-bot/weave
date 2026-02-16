@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import DMPrepSection from './DMPrepSection'
 import { fetchTemplates as apiGetTemplates, fetchTemplate } from '../api/templates'
+import { generateFields, generateFieldsStandalone } from '../api/content'
 
 const TRIGGER_TYPES = [
   { value: 'start', label: 'Available from start' },
@@ -141,6 +142,28 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   const [fillerSeeds, setFillerSeeds] = useState(
     initialData?.filler_seeds || ['', '', '', '', '']
   )
+
+  // === Character Arcs State ===
+  const [characterArcs, setCharacterArcs] = useState(
+    initialData?.character_arcs || []
+  )
+
+  // === DM Decides State ===
+  const [threatDmDecides, setThreatDmDecides] = useState({})
+  const [npcDmDecides, setNpcDmDecides] = useState(
+    (initialData?.npcs || [{}, {}]).map(() => ({}))
+  )
+  const [locationDmDecides, setLocationDmDecides] = useState(
+    (initialData?.locations || [{}, {}]).map(() => ({}))
+  )
+  const [runDmDecides, setRunDmDecides] = useState(
+    (initialData?.anchor_runs || [{}, {}, {}]).map(() => ({}))
+  )
+  const [arcDmDecides, setArcDmDecides] = useState(
+    (initialData?.character_arcs || []).map(() => ({}))
+  )
+  const [generating, setGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState(null)
 
   // === System Config State ===
   const [system, setSystem] = useState(initialSystem || DEFAULT_SYSTEM)
@@ -425,7 +448,16 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
             value: r.trigger.value || null
           }
         })),
-      filler_seeds: fillerSeeds.filter(s => s.trim().length >= 10).map(s => s.trim())
+      filler_seeds: fillerSeeds.filter(s => s.trim().length >= 10).map(s => s.trim()),
+      character_arcs: characterArcs
+        .filter(a => a.id && a.name && a.milestones?.length >= 2 && a.reward?.name && a.reward?.description)
+        .map(a => ({
+          id: a.id.trim(),
+          name: a.name.trim(),
+          suggested_for: a.suggested_for || [],
+          milestones: a.milestones.filter(m => m.trim()).map(m => m.trim()),
+          reward: { name: a.reward.name.trim(), description: a.reward.description.trim() }
+        }))
     }
   }
 
@@ -444,6 +476,10 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   }
 
   const handleSubmit = () => {
+    if (hasDmDecidesFields()) {
+      setErrors(['Generate or uncheck all "DM decides" fields before publishing'])
+      return
+    }
     if (validate()) {
       onSubmit({
         content: buildCampaignData(),
@@ -488,7 +524,17 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
             value: r.trigger.value || null
           }
         })),
-        filler_seeds: fillerSeeds.map(s => s.trim())
+        filler_seeds: fillerSeeds.map(s => s.trim()),
+        character_arcs: characterArcs.map(a => ({
+          id: a.id?.trim() || '',
+          name: a.name?.trim() || '',
+          suggested_for: a.suggested_for || [],
+          milestones: a.milestones?.map(m => m?.trim() || '') || ['', ''],
+          reward: {
+            name: a.reward?.name?.trim() || '',
+            description: a.reward?.description?.trim() || ''
+          }
+        }))
       },
       system: system
     }
@@ -512,12 +558,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   const addNpc = () => {
     if (npcs.length < VALIDATION.maxNPCs) {
       setNpcs([...npcs, { name: '', species: system.species[0]?.name || '', role: '', wants: '', secret: '' }])
+      setNpcDmDecides(prev => [...prev, {}])
     }
   }
 
   const removeNpc = (index) => {
     if (npcs.length > VALIDATION.minNPCs) {
       setNpcs(npcs.filter((_, i) => i !== index))
+      setNpcDmDecides(prev => prev.filter((_, i) => i !== index))
     }
   }
 
@@ -541,12 +589,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
   const addLocation = () => {
     if (locations.length < VALIDATION.maxLocations) {
       setLocations([...locations, { name: '', vibe: '', contains: [] }])
+      setLocationDmDecides(prev => [...prev, {}])
     }
   }
 
   const removeLocation = (index) => {
     if (locations.length > VALIDATION.minLocations) {
       setLocations(locations.filter((_, i) => i !== index))
+      setLocationDmDecides(prev => prev.filter((_, i) => i !== index))
     }
   }
 
@@ -588,12 +638,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
         id: '', hook: '', goal: '', tone: '', must_include: [''], reveal: '',
         trigger: { type: 'after_run', value: '' }
       }])
+      setRunDmDecides(prev => [...prev, {}])
     }
   }
 
   const removeAnchorRun = (index) => {
     if (anchorRuns.length > VALIDATION.minAnchorRuns) {
       setAnchorRuns(anchorRuns.filter((_, i) => i !== index))
+      setRunDmDecides(prev => prev.filter((_, i) => i !== index))
     }
   }
 
@@ -633,8 +685,223 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     }
   }
 
+  // === Character Arc Helpers ===
+  const updateArc = (index, field, value) => {
+    const updated = [...characterArcs]
+    updated[index] = { ...updated[index], [field]: value }
+    setCharacterArcs(updated)
+  }
+
+  const updateArcMilestone = (arcIndex, mIndex, value) => {
+    const updated = [...characterArcs]
+    updated[arcIndex].milestones[mIndex] = value
+    setCharacterArcs(updated)
+  }
+
+  const addArcMilestone = (arcIndex) => {
+    if (characterArcs[arcIndex].milestones.length < 5) {
+      const updated = [...characterArcs]
+      updated[arcIndex].milestones = [...updated[arcIndex].milestones, '']
+      setCharacterArcs(updated)
+    }
+  }
+
+  const removeArcMilestone = (arcIndex, mIndex) => {
+    if (characterArcs[arcIndex].milestones.length > 2) {
+      const updated = [...characterArcs]
+      updated[arcIndex].milestones = updated[arcIndex].milestones.filter((_, i) => i !== mIndex)
+      setCharacterArcs(updated)
+    }
+  }
+
+  const toggleArcSpecies = (arcIndex, speciesName) => {
+    const updated = [...characterArcs]
+    const suggested = updated[arcIndex].suggested_for || []
+    if (suggested.includes(speciesName)) {
+      updated[arcIndex].suggested_for = suggested.filter(s => s !== speciesName)
+    } else {
+      updated[arcIndex].suggested_for = [...suggested, speciesName]
+    }
+    setCharacterArcs(updated)
+  }
+
+  const addArc = () => {
+    if (characterArcs.length < 10) {
+      setCharacterArcs([...characterArcs, {
+        id: '', name: '', suggested_for: [], milestones: ['', ''],
+        reward: { name: '', description: '' }
+      }])
+      setArcDmDecides(prev => [...prev, {}])
+    }
+  }
+
+  const removeArc = (index) => {
+    setCharacterArcs(characterArcs.filter((_, i) => i !== index))
+    setArcDmDecides(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // === DM Decides Toggle Helpers ===
+  const toggleThreatDmDecides = (field) => {
+    setThreatDmDecides(prev => ({ ...prev, [field]: !prev[field] }))
+  }
+
+  const toggleNpcDmDecides = (i, field) => {
+    setNpcDmDecides(prev => {
+      const updated = [...prev]
+      updated[i] = { ...updated[i], [field]: !updated[i]?.[field] }
+      return updated
+    })
+  }
+
+  const toggleLocationDmDecides = (i, field) => {
+    setLocationDmDecides(prev => {
+      const updated = [...prev]
+      updated[i] = { ...updated[i], [field]: !updated[i]?.[field] }
+      return updated
+    })
+  }
+
+  const toggleRunDmDecides = (i, field) => {
+    setRunDmDecides(prev => {
+      const updated = [...prev]
+      updated[i] = { ...updated[i], [field]: !updated[i]?.[field] }
+      return updated
+    })
+  }
+
+  const toggleArcDmDecides = (i, field) => {
+    setArcDmDecides(prev => {
+      const updated = [...prev]
+      updated[i] = { ...updated[i], [field]: !updated[i]?.[field] }
+      return updated
+    })
+  }
+
+  const hasDmDecidesFields = () => {
+    if (Object.values(threatDmDecides).some(v => v)) return true
+    if (npcDmDecides.some(n => Object.values(n).some(v => v))) return true
+    if (locationDmDecides.some(l => Object.values(l).some(v => v))) return true
+    if (runDmDecides.some(r => Object.values(r).some(v => v))) return true
+    if (arcDmDecides.some(a => Object.values(a).some(v => v))) return true
+    return false
+  }
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    setGenerateError(null)
+
+    const generate = {}
+
+    // Build generate map from DM-decides state
+    if (Object.values(threatDmDecides).some(v => v)) {
+      generate.threat = { ...threatDmDecides }
+    }
+
+    const npcGen = npcDmDecides.map(n => {
+      const fields = Object.entries(n).filter(([, v]) => v)
+      return fields.length > 0 ? Object.fromEntries(fields) : null
+    })
+    if (npcGen.some(n => n)) generate.npcs = npcGen
+
+    const locGen = locationDmDecides.map(l => {
+      const fields = Object.entries(l).filter(([, v]) => v)
+      return fields.length > 0 ? Object.fromEntries(fields) : null
+    })
+    if (locGen.some(l => l)) generate.locations = locGen
+
+    const runGen = runDmDecides.map(r => {
+      const fields = Object.entries(r).filter(([, v]) => v)
+      return fields.length > 0 ? Object.fromEntries(fields) : null
+    })
+    if (runGen.some(r => r)) generate.anchor_runs = runGen
+
+    const arcGen = arcDmDecides.map(a => {
+      const fields = Object.entries(a).filter(([, v]) => v)
+      return fields.length > 0 ? Object.fromEntries(fields) : null
+    })
+    if (arcGen.some(a => a)) generate.character_arcs = arcGen
+
+    const content = {
+      name, premise, tone,
+      threat: { name: threatName, stages: threatStages },
+      npcs, locations, anchor_runs: anchorRuns,
+      filler_seeds: fillerSeeds, character_arcs: characterArcs
+    }
+
+    const payload = {
+      content,
+      generate,
+      available_species: system.species.filter(s => s.name).map(s => s.name),
+      available_tags: system.location_tags.filter(t => t.value).map(t => t.value),
+    }
+
+    try {
+      const result = campaignId
+        ? await generateFields(campaignId, payload)
+        : await generateFieldsStandalone(payload)
+
+      const gen = result.generated
+
+      // Apply generated fields
+      if (gen.threat) {
+        if (gen.threat.name) setThreatName(gen.threat.name)
+        if (gen.threat.stages) setThreatStages(gen.threat.stages)
+      }
+
+      if (gen.npcs) {
+        setNpcs(prev => prev.map((npc, i) => {
+          if (!gen.npcs[i]) return npc
+          return { ...npc, ...gen.npcs[i] }
+        }))
+      }
+
+      if (gen.locations) {
+        setLocations(prev => prev.map((loc, i) => {
+          if (!gen.locations[i]) return loc
+          return { ...loc, ...gen.locations[i] }
+        }))
+      }
+
+      if (gen.anchor_runs) {
+        setAnchorRuns(prev => prev.map((run, i) => {
+          if (!gen.anchor_runs[i]) return run
+          return { ...run, ...gen.anchor_runs[i] }
+        }))
+      }
+
+      if (gen.character_arcs) {
+        setCharacterArcs(prev => prev.map((arc, i) => {
+          if (!gen.character_arcs[i]) return arc
+          const genArc = gen.character_arcs[i]
+          return {
+            ...arc,
+            ...genArc,
+            reward: genArc.reward_name || genArc.reward_description
+              ? {
+                  name: genArc.reward_name || arc.reward?.name || '',
+                  description: genArc.reward_description || arc.reward?.description || ''
+                }
+              : arc.reward
+          }
+        }))
+      }
+
+      // Clear all DM-decides checkboxes
+      setThreatDmDecides({})
+      setNpcDmDecides(prev => prev.map(() => ({})))
+      setLocationDmDecides(prev => prev.map(() => ({})))
+      setRunDmDecides(prev => prev.map(() => ({})))
+      setArcDmDecides(prev => prev.map(() => ({})))
+
+    } catch (err) {
+      setGenerateError(err.message || 'Generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   // === Section navigation ===
-  const sections = ['system', 'basics', 'threat', 'npcs', 'locations', 'runs', 'fillers', 'dm-prep']
+  const sections = ['system', 'basics', 'threat', 'npcs', 'locations', 'runs', 'arcs', 'fillers', 'dm-prep']
   const sectionLabels = {
     system: 'System',
     basics: 'Basics',
@@ -642,6 +909,7 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
     npcs: 'NPCs',
     locations: 'Locations',
     runs: 'Episodes',
+    arcs: 'Arcs',
     fillers: 'Filler Seeds',
     'dm-prep': 'DM Prep'
   }
@@ -1319,8 +1587,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
         {/* === THREAT === */}
         {currentSection === 'threat' && (
           <div className="form-section">
-            <div className="form-group">
-              <label>Threat Name *</label>
+            <div className={`form-group dm-decides-field ${threatDmDecides.name ? 'checked' : ''}`}>
+              <div className="field-label-row">
+                <label>Threat Name *</label>
+                <label className="dm-decides-label">
+                  <input type="checkbox" checked={!!threatDmDecides.name} onChange={() => toggleThreatDmDecides('name')} />
+                  DM decides
+                </label>
+              </div>
               <input
                 type="text"
                 value={threatName}
@@ -1330,8 +1604,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
               />
             </div>
 
-            <div className="form-group">
-              <label>Threat Stages * <span className="hint">(escalating states, {VALIDATION.minThreatStages}-{VALIDATION.maxThreatStages})</span></label>
+            <div className={`form-group dm-decides-field ${threatDmDecides.stages ? 'checked' : ''}`}>
+              <div className="field-label-row">
+                <label>Threat Stages * <span className="hint">(escalating states, {VALIDATION.minThreatStages}-{VALIDATION.maxThreatStages})</span></label>
+                <label className="dm-decides-label">
+                  <input type="checkbox" checked={!!threatDmDecides.stages} onChange={() => toggleThreatDmDecides('stages')} />
+                  DM decides
+                </label>
+              </div>
               {threatStages.map((stage, i) => (
                 <div key={i} className="array-item">
                   <span className="array-index">{i + 1}.</span>
@@ -1378,8 +1658,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                 </div>
 
                 <div className="form-row">
-                  <div className="form-group half">
-                    <label>Name *</label>
+                  <div className={`form-group half dm-decides-field ${npcDmDecides[i]?.name ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>Name *</label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!npcDmDecides[i]?.name} onChange={() => toggleNpcDmDecides(i, 'name')} />
+                        DM
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={npc.name}
@@ -1388,8 +1674,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                       maxLength={50}
                     />
                   </div>
-                  <div className="form-group half">
-                    <label>Species *</label>
+                  <div className={`form-group half dm-decides-field ${npcDmDecides[i]?.species ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>Species *</label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!npcDmDecides[i]?.species} onChange={() => toggleNpcDmDecides(i, 'species')} />
+                        DM
+                      </label>
+                    </div>
                     <select value={npc.species || ''} onChange={e => updateNpc(i, 'species', e.target.value)}>
                       <option value="">Select species...</option>
                       {system.species.filter(s => s.name).map(s => (
@@ -1399,8 +1691,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label>Role * <span className="hint">(one phrase)</span></label>
+                <div className={`form-group dm-decides-field ${npcDmDecides[i]?.role ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Role * <span className="hint">(one phrase)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!npcDmDecides[i]?.role} onChange={() => toggleNpcDmDecides(i, 'role')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={npc.role}
@@ -1410,8 +1708,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>Wants * <span className="hint">(what they're trying to achieve)</span></label>
+                <div className={`form-group dm-decides-field ${npcDmDecides[i]?.wants ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Wants * <span className="hint">(what they're trying to achieve)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!npcDmDecides[i]?.wants} onChange={() => toggleNpcDmDecides(i, 'wants')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={npc.wants}
@@ -1421,8 +1725,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>Secret * <span className="hint">(what they know or are hiding)</span></label>
+                <div className={`form-group dm-decides-field ${npcDmDecides[i]?.secret ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Secret * <span className="hint">(what they know or are hiding)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!npcDmDecides[i]?.secret} onChange={() => toggleNpcDmDecides(i, 'secret')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={npc.secret}
@@ -1454,8 +1764,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   )}
                 </div>
 
-                <div className="form-group">
-                  <label>Name *</label>
+                <div className={`form-group dm-decides-field ${locationDmDecides[i]?.name ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Name *</label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!locationDmDecides[i]?.name} onChange={() => toggleLocationDmDecides(i, 'name')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={loc.name}
@@ -1465,8 +1781,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>Vibe * <span className="hint">(one sentence atmosphere)</span></label>
+                <div className={`form-group dm-decides-field ${locationDmDecides[i]?.vibe ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Vibe * <span className="hint">(one sentence atmosphere)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!locationDmDecides[i]?.vibe} onChange={() => toggleLocationDmDecides(i, 'vibe')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={loc.vibe}
@@ -1476,8 +1798,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>Contains * <span className="hint">(select at least one)</span></label>
+                <div className={`form-group dm-decides-tags ${locationDmDecides[i]?.contains ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Contains * <span className="hint">(select at least one)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!locationDmDecides[i]?.contains} onChange={() => toggleLocationDmDecides(i, 'contains')} />
+                      DM decides
+                    </label>
+                  </div>
                   <div className="tag-buttons">
                     {system.location_tags.filter(t => t.value && t.label).map(tag => (
                       <button
@@ -1516,8 +1844,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                 </div>
 
                 <div className="form-row">
-                  <div className="form-group half">
-                    <label>ID * <span className="hint">(lowercase, no spaces)</span></label>
+                  <div className={`form-group half dm-decides-field ${runDmDecides[i]?.id ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>ID * <span className="hint">(lowercase, no spaces)</span></label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!runDmDecides[i]?.id} onChange={() => toggleRunDmDecides(i, 'id')} />
+                        DM
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={run.id}
@@ -1538,8 +1872,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label>Hook * <span className="hint">(the quest prompt shown to players)</span></label>
+                <div className={`form-group dm-decides-field ${runDmDecides[i]?.hook ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Hook * <span className="hint">(the quest prompt shown to players)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!runDmDecides[i]?.hook} onChange={() => toggleRunDmDecides(i, 'hook')} />
+                      DM decides
+                    </label>
+                  </div>
                   <textarea
                     value={run.hook}
                     onChange={e => updateAnchorRun(i, 'hook', e.target.value)}
@@ -1549,8 +1889,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   />
                 </div>
 
-                <div className="form-group">
-                  <label>Goal * <span className="hint">(what success looks like)</span></label>
+                <div className={`form-group dm-decides-field ${runDmDecides[i]?.goal ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Goal * <span className="hint">(what success looks like)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!runDmDecides[i]?.goal} onChange={() => toggleRunDmDecides(i, 'goal')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={run.goal}
@@ -1581,8 +1927,14 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
                   )}
                 </div>
 
-                <div className="form-group">
-                  <label>Reveal * <span className="hint">(what the party learns on success)</span></label>
+                <div className={`form-group dm-decides-field ${runDmDecides[i]?.reveal ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Reveal * <span className="hint">(what the party learns on success)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!runDmDecides[i]?.reveal} onChange={() => toggleRunDmDecides(i, 'reveal')} />
+                      DM decides
+                    </label>
+                  </div>
                   <input
                     type="text"
                     value={run.reveal}
@@ -1655,6 +2007,141 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
           </div>
         )}
 
+        {/* === CHARACTER ARCS === */}
+        {currentSection === 'arcs' && (
+          <div className="form-section">
+            <p className="section-intro">
+              Optional character arcs players can choose during character creation. Each arc has milestones and a reward.
+            </p>
+
+            {characterArcs.map((arc, i) => (
+              <div key={i} className="sub-form-card">
+                <div className="sub-form-header">
+                  <span>Arc {i + 1}</span>
+                  <button className="remove-btn" onClick={() => removeArc(i)}>Remove</button>
+                </div>
+
+                <div className="form-row">
+                  <div className={`form-group half dm-decides-field ${arcDmDecides[i]?.id ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>ID * <span className="hint">(lowercase, no spaces)</span></label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!arcDmDecides[i]?.id} onChange={() => toggleArcDmDecides(i, 'id')} />
+                        DM
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      value={arc.id}
+                      onChange={e => updateArc(i, 'id', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                      placeholder="e.g., brave_path"
+                      maxLength={30}
+                    />
+                  </div>
+                  <div className={`form-group half dm-decides-field ${arcDmDecides[i]?.name ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>Name *</label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!arcDmDecides[i]?.name} onChange={() => toggleArcDmDecides(i, 'name')} />
+                        DM
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      value={arc.name}
+                      onChange={e => updateArc(i, 'name', e.target.value)}
+                      placeholder="e.g., Path of Courage"
+                      maxLength={50}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Suggested For <span className="hint">(optional, species this arc fits)</span></label>
+                  <div className="tag-buttons">
+                    {system.species.filter(s => s.name).map(spec => (
+                      <button
+                        key={spec.name}
+                        className={`tag-btn ${(arc.suggested_for || []).includes(spec.name) ? 'active' : ''}`}
+                        onClick={() => toggleArcSpecies(i, spec.name)}
+                      >
+                        {spec.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className={`form-group dm-decides-field ${arcDmDecides[i]?.milestones ? 'checked' : ''}`}>
+                  <div className="field-label-row">
+                    <label>Milestones * <span className="hint">(2-5 goals to progress)</span></label>
+                    <label className="dm-decides-label">
+                      <input type="checkbox" checked={!!arcDmDecides[i]?.milestones} onChange={() => toggleArcDmDecides(i, 'milestones')} />
+                      DM decides
+                    </label>
+                  </div>
+                  {arc.milestones.map((m, j) => (
+                    <div key={j} className="array-item">
+                      <span className="array-index">{j + 1}.</span>
+                      <input
+                        type="text"
+                        value={m}
+                        onChange={e => updateArcMilestone(i, j, e.target.value)}
+                        placeholder={`Milestone ${j + 1}`}
+                        maxLength={200}
+                      />
+                      {arc.milestones.length > 2 && (
+                        <button className="remove-btn" onClick={() => removeArcMilestone(i, j)}>x</button>
+                      )}
+                    </div>
+                  ))}
+                  {arc.milestones.length < 5 && (
+                    <button className="add-btn small" onClick={() => addArcMilestone(i)}>+ Add Milestone</button>
+                  )}
+                </div>
+
+                <div className="form-row">
+                  <div className={`form-group half dm-decides-field ${arcDmDecides[i]?.reward_name ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>Reward Name *</label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!arcDmDecides[i]?.reward_name} onChange={() => toggleArcDmDecides(i, 'reward_name')} />
+                        DM
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      value={arc.reward?.name || ''}
+                      onChange={e => updateArc(i, 'reward', { ...arc.reward, name: e.target.value })}
+                      placeholder="e.g., Heart of Valor"
+                      maxLength={50}
+                    />
+                  </div>
+                  <div className={`form-group half dm-decides-field ${arcDmDecides[i]?.reward_description ? 'checked' : ''}`}>
+                    <div className="field-label-row">
+                      <label>Reward Description *</label>
+                      <label className="dm-decides-label">
+                        <input type="checkbox" checked={!!arcDmDecides[i]?.reward_description} onChange={() => toggleArcDmDecides(i, 'reward_description')} />
+                        DM
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      value={arc.reward?.description || ''}
+                      onChange={e => updateArc(i, 'reward', { ...arc.reward, description: e.target.value })}
+                      placeholder="e.g., +1 to Brave stat permanently"
+                      maxLength={200}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {characterArcs.length < 10 && (
+              <button className="add-btn" onClick={addArc}>+ Add Character Arc</button>
+            )}
+          </div>
+        )}
+
         {/* === FILLER SEEDS === */}
         {currentSection === 'fillers' && (
           <div className="form-section">
@@ -1712,10 +2199,22 @@ function CampaignForm({ onSubmit, onCancel, onSaveDraft, initialData = null, ini
             Save Draft
           </button>
         )}
+        {hasDmDecidesFields() && (
+          <button
+            className="btn-gold"
+            onClick={handleGenerate}
+            disabled={generating}
+          >
+            {generating ? 'Generating...' : 'Generate DM Fields'}
+          </button>
+        )}
         <button className="btn btn-primary" onClick={handleSubmit}>
           {initialData ? 'Save Changes' : 'Create Campaign'}
         </button>
       </div>
+      {generateError && (
+        <div className="generate-error">{generateError}</div>
+      )}
     </div>
   )
 }

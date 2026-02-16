@@ -3,11 +3,13 @@ import * as campaignsApi from '../api/campaigns'
 
 export function useCampaigns() {
   const [campaigns, setCampaigns] = useState([])
+  const [serverActiveCampaignId, setServerActiveCampaignId] = useState(null)
 
   const refresh = useCallback(async (autoSelect) => {
     try {
       const data = await campaignsApi.fetchCampaigns()
       setCampaigns(data.campaigns || [])
+      setServerActiveCampaignId(data.activeCampaignId || null)
       return data
     } catch (err) {
       console.error('Failed to fetch campaigns:', err)
@@ -19,5 +21,5 @@ export function useCampaigns() {
     refresh()
   }, [refresh])
 
-  return { campaigns, refresh }
+  return { campaigns, serverActiveCampaignId, refresh }
 }

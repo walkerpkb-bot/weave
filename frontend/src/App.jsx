@@ -22,20 +22,20 @@ function App() {
   const [selectedCharacter, setSelectedCharacter] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
 
-  const { campaigns, refresh: refreshCampaigns } = useCampaigns()
+  const { campaigns, serverActiveCampaignId, refresh: refreshCampaigns } = useCampaigns()
   const {
-    session, roster, town, systemConfig,
-    fetchSystemConfig, fetchSession, fetchRoster, fetchTown,
+    session, roster, town, systemConfig, campaignContent,
+    fetchSystemConfig, fetchSession, fetchRoster, fetchTown, fetchContent,
     handleCreateCharacter, handleStartSession, handleUpdateSession, handleEndSession,
     reset,
   } = useCampaignData(activeCampaignId)
 
-  // Auto-select if there's only one campaign on initial load
+  // Auto-select if server has an active campaign and we don't
   useEffect(() => {
-    if (campaigns.length === 1 && !activeCampaignId) {
-      selectCampaign(campaigns[0].id)
+    if (serverActiveCampaignId && !activeCampaignId) {
+      selectCampaign(serverActiveCampaignId)
     }
-  }, [campaigns])
+  }, [serverActiveCampaignId])
 
   // When campaign is selected, fetch campaign data
   useEffect(() => {
@@ -44,6 +44,7 @@ function App() {
       fetchSession()
       fetchRoster()
       fetchTown()
+      fetchContent()
     }
   }, [activeCampaignId, currentView])
 
@@ -177,6 +178,7 @@ function App() {
                 onSave={onCreateCharacter}
                 onCancel={() => setSelectedCharacter(null)}
                 systemConfig={systemConfig}
+                availableArcs={campaignContent?.character_arcs || []}
               />
             </div>
           </div>
